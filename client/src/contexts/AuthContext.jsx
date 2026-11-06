@@ -1,6 +1,20 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import api from '../utils/api';
+import { assetUrl, getErrorMessage } from '../utils/config';
 import toast from 'react-hot-toast';
+
+// The server returns { token, church: {...} }; map its fields to what the UI expects.
+const normalizeUser = (data) => {
+  const u = data?.church || data?.user || data;
+  if (!u || typeof u !== 'object') return null;
+  const logo = u.logoUrl || u.logoPath;
+  return {
+    ...u,
+    logoUrl: logo ? assetUrl(logo) : null,
+    branding: u.branding || u.brandingConfig || {},
+    preferredTranslation: u.preferredTranslation || u.selectedTranslation || 'KJV',
+  };
+};
 
 const AuthContext = createContext(null);
 
@@ -31,7 +45,7 @@ export const AuthProvider = ({ children }) => {
 
     try {
       const res = await api.get('/auth/me');
-      setUser(res.data.user || res.data);
+      setUser(normalizeUser(res.data));
     } catch (err) {
       console.warn('Failed to fetch user session:', err?.response?.data?.message || err.message);
       handleSetToken(null);
@@ -49,14 +63,14 @@ export const AuthProvider = ({ children }) => {
     try {
       const res = await api.post('/auth/login', { email, password });
       const authToken = res.data.token;
-      const authUser = res.data.user || res.data;
+      const authUser = normalizeUser(res.data);
 
       handleSetToken(authToken);
       setUser(authUser);
       toast.success(res.data.message || 'Welcome back!');
       return { success: true, user: authUser };
     } catch (error) {
-      const msg = error.response?.data?.message || 'Login failed. Please check your credentials.';
+      const msg = getErrorMessage(error, 'Login failed. Please check your credentials.');
       toast.error(msg);
       return { success: false, error: msg };
     }
@@ -71,7 +85,7 @@ export const AuthProvider = ({ children }) => {
 
       const res = await api.post('/auth/register', registrationData, { headers });
       const authToken = res.data.token;
-      const authUser = res.data.user || res.data;
+      const authUser = normalizeUser(res.data);
 
       if (authToken) {
         handleSetToken(authToken);
@@ -80,7 +94,7 @@ export const AuthProvider = ({ children }) => {
       toast.success('Registration successful! Welcome to ScriptureLive AI.');
       return { success: true, user: authUser };
     } catch (error) {
-      const msg = error.response?.data?.message || 'Registration failed. Please check your details.';
+      const msg = getErrorMessage(error, 'Registration failed. Please check your details.');
       toast.error(msg);
       return { success: false, error: msg };
     }
@@ -96,7 +110,7 @@ export const AuthProvider = ({ children }) => {
   const updateProfile = async (profileData) => {
     try {
       const res = await api.put('/church/profile', profileData);
-      const updatedUser = res.data.user || res.data.church || { ...user, ...profileData };
+      const updatedUser = normalizeUser(res.data.church || res.data.user ? res.data : { ...user, ...profileData });
       setUser(prev => ({ ...prev, ...updatedUser }));
       toast.success('Church profile updated successfully');
       return { success: true, user: updatedUser };
@@ -115,7 +129,7 @@ export const AuthProvider = ({ children }) => {
       const res = await api.post('/church/logo', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      const logoUrl = res.data.logoUrl || res.data.url;
+      const logoUrl = assetUrl(res.data.logoUrl || res.data.url);
       setUser(prev => ({ ...prev, logoUrl }));
       toast.success('Logo uploaded successfully');
       return { success: true, logoUrl };

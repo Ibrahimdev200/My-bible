@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import { useAuth } from './AuthContext';
+import { API_BASE } from '../utils/config';
 
 const SocketContext = createContext(null);
 
@@ -45,7 +46,7 @@ export const SocketProvider = ({ children }) => {
   // Socket.io initialization
   useEffect(() => {
     // Connect to backend socket
-    const socketInstance = io(window.location.origin, {
+    const socketInstance = io(API_BASE || window.location.origin, {
       path: '/socket.io',
       auth: {
         token: token || '',

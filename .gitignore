@@ -1,1 +1,12 @@
 node_modules
+dist
+
+# Secrets & local databases (never commit these)
+.env
+server/.env
+server/data/church.db
+server/uploads/logos/*
+!server/uploads/logos/.gitkeep
+
+# Raw Bible download caches (bible.db is the built database)
+server/src/bible/data/*_raw.json

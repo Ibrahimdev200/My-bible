@@ -13,6 +13,16 @@ if (!fs.existsSync(dataDir)) {
 }
 
 function createPostgresSequelize() {
+  // Hosted Postgres (Neon, Render, Supabase, Railway) provides a single connection string.
+  if (process.env.DATABASE_URL) {
+    return new Sequelize(process.env.DATABASE_URL, {
+      dialect: 'postgres',
+      logging: false,
+      dialectOptions: process.env.DB_SSL === 'false' ? {} : { ssl: { require: true, rejectUnauthorized: false } },
+      pool: { max: 10, min: 0, acquire: 30000, idle: 10000 }
+    });
+  }
+
   const host = process.env.DB_HOST || 'localhost';
   const port = parseInt(process.env.DB_PORT || '5432', 10);
   const database = process.env.DB_NAME || 'scripturelive';
@@ -77,9 +87,10 @@ async function initDatabase() {
   } else {
     try {
       console.info(`[Database] Connecting to PostgreSQL at ${process.env.DB_HOST || 'localhost'}:${process.env.DB_PORT || '5432'}...`);
-      // Short connection timeout for fast fallback
+      // Short connection timeout for fast local fallback; hosted DBs may need time to wake up
+      const timeoutMs = process.env.DATABASE_URL ? 15000 : 3000;
       const testTimeout = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('PostgreSQL connection timeout (3s)')), 3000)
+        setTimeout(() => reject(new Error(`PostgreSQL connection timeout (${timeoutMs / 1000}s)`)), timeoutMs)
       );
       await Promise.race([currentSequelize.authenticate(), testTimeout]);
       activeDialect = 'postgres';
