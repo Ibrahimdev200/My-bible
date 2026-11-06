@@ -1,0 +1,19 @@
+{
+  "name": "scripturelive-ai",
+  "version": "1.0.0",
+  "description": "AI-Powered Automatic Bible Scripture Recognition & Live Projection System",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "cd server && npm run dev",
+    "client": "cd client && npm run dev",
+    "build": "cd client && npm run build",
+    "import-bible": "cd server && node src/bible/import.js",
+    "setup-db": "cd server && node src/config/setup.js",
+    "start": "cd server && npm start"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
+
