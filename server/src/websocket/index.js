@@ -60,10 +60,15 @@ function initSocket(httpServer) {
         }
 
         const payload = {
+          ...data,
           reference: data.reference,
           text: data.text || data.verseText,
+          book: data.book || data.bookName || null,
+          chapter: data.chapter || null,
+          verse: data.verse || data.startVerse || null,
           translation: data.translation || 'KJV',
-          churchLogo: data.churchLogo || null,
+          logoUrl: data.logoUrl || data.churchLogo || null,
+          churchLogo: data.churchLogo || data.logoUrl || null,
           churchName: data.churchName || null,
           branding: data.branding || null,
           confidence: data.confidence || 1.0,
@@ -118,6 +123,22 @@ function initSocket(httpServer) {
         console.log(`[Socket.IO] Clear projection sent to church ${churchId}`);
       } catch (err) {
         console.error('[Socket.IO] Error in clear-projection:', err);
+      }
+    });
+
+    // Scroll projection screen (up, down, top, bottom)
+    socket.on('scroll-projection', (data = {}) => {
+      try {
+        const churchId = data.churchId || currentChurchId;
+        if (!churchId) return;
+
+        io.to(churchId).emit('scroll-projection', {
+          direction: data.direction || 'down',
+          amount: data.amount || 260,
+          timestamp: new Date().toISOString()
+        });
+      } catch (err) {
+        console.error('[Socket.IO] Error in scroll-projection:', err);
       }
     });
 

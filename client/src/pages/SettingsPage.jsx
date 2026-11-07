@@ -45,7 +45,7 @@ const SettingsPage = () => {
     backgroundColor: user?.branding?.backgroundColor || '#0b1137',
     textColor: user?.branding?.textColor || '#ffffff',
     fontSize: user?.branding?.fontSize || 48,
-    displayDuration: user?.branding?.displayDuration || 15,
+    displayDuration: user?.branding?.displayDuration ?? 300,
   });
 
   const [logoPreview, setLogoPreview] = useState(user?.logoUrl || null);
@@ -350,10 +350,11 @@ const SettingsPage = () => {
                     onChange={(e) => handleBrandingChange('displayDuration', Number(e.target.value))}
                     className="w-full bg-navy-950 border border-navy-700 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-gold-500 cursor-pointer"
                   >
-                    <option value={10}>10 Seconds</option>
-                    <option value={15}>15 Seconds (Recommended)</option>
-                    <option value={30}>30 Seconds</option>
+                    <option value={300}>5 Minutes (Default)</option>
+                    <option value={180}>3 Minutes</option>
                     <option value={60}>1 Minute</option>
+                    <option value={30}>30 Seconds</option>
+                    <option value={15}>15 Seconds</option>
                     <option value={0}>Permanent (Hold until cleared)</option>
                   </select>
                 </div>

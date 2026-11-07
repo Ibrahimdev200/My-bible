@@ -8,7 +8,7 @@ import { Mic, Radio, Wifi, WifiOff } from 'lucide-react';
 const Header = () => {
   const location = useLocation();
   const { user } = useAuth();
-  const { isConnected, isMicListening, currentScripture } = useSocket();
+  const { isConnected, isMicListening, currentScripture, toggleGlobalListening } = useSocket();
 
   // Dynamic Page Title
   const getPageTitle = () => {
@@ -39,14 +39,16 @@ const Header = () => {
 
       {/* Right Controls */}
       <div className="flex items-center gap-4">
-        {/* Mic Status */}
-        <div
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
+        {/* Mic Status (Click to Toggle Voice Capture from any page) */}
+        <button
+          type="button"
+          onClick={toggleGlobalListening}
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer ${
             isMicListening
               ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400 shadow-sm shadow-emerald-500/20'
-              : 'bg-navy-800 border-navy-700 text-slate-400'
+              : 'bg-navy-800 hover:bg-navy-700 border-navy-700 text-slate-300'
           }`}
-          title={isMicListening ? 'Microphone is active & listening' : 'Microphone is currently idle'}
+          title={isMicListening ? 'Microphone is active — click to pause' : 'Click to turn on live voice capture'}
         >
           <div className="relative flex items-center justify-center">
             <Mic className={`w-3.5 h-3.5 ${isMicListening ? 'text-emerald-400' : 'text-slate-400'}`} />
@@ -54,8 +56,8 @@ const Header = () => {
               <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
             )}
           </div>
-          <span>{isMicListening ? 'Mic Active' : 'Mic Idle'}</span>
-        </div>
+          <span>{isMicListening ? 'Mic Active' : 'Start Mic'}</span>
+        </button>
 
         {/* Translation Selector */}
         <div className="hidden sm:block">

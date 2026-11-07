@@ -2,6 +2,9 @@ import React, { createContext, useContext, useEffect, useState, useRef, useCallb
 import { io } from 'socket.io-client';
 import { useAuth } from './AuthContext';
 import { API_BASE, assetUrl } from '../utils/config';
+import { detectScripture, detectVoiceCommand, parseReferenceContext } from '../utils/scriptureDetector';
+import api from '../utils/api';
+import toast from 'react-hot-toast';
 
 const SocketContext = createContext(null);
 
@@ -17,15 +20,55 @@ export const SocketProvider = ({ children }) => {
       return null;
     }
   });
-  const [displayDuration, setDisplayDuration] = useState(15);
+  // Default 5 minutes (300 seconds) display duration as requested
+  const [displayDuration, setDisplayDuration] = useState(300);
   const [liveTranscript, setLiveTranscript] = useState('');
   const [isMicListening, setIsMicListening] = useState(false);
+  const [audioLevel, setAudioLevel] = useState(0);
+  const [autoProject, setAutoProject] = useState(true);
+  const [pendingScripture, setPendingScripture] = useState(null);
+  const [sessionDetections, setSessionDetections] = useState([]);
+  const [scrollCommand, setScrollCommand] = useState(null);
 
-  // Broadcast channel for instantaneous cross-tab syncing (Projection window <-> Dashboard)
+  // Refs for global continuous voice capture
   const channelRef = useRef(null);
   const timerRef = useRef(null);
+  const currentScriptureRef = useRef(currentScripture);
+  const userRef = useRef(user);
+  const autoProjectRef = useRef(autoProject);
+  const displayDurationRef = useRef(displayDuration);
 
-  // Initialize broadcast channel
+  const recognitionRef = useRef(null);
+  const shouldListenRef = useRef(false);
+  const audioContextRef = useRef(null);
+  const analyserRef = useRef(null);
+  const animationFrameRef = useRef(null);
+  const mediaStreamRef = useRef(null);
+
+  const lastDetectedRef = useRef('');
+  const lastDetectedTime = useRef(0);
+  const lastCommandKey = useRef('');
+  const lastCommandTime = useRef(0);
+  const interimQuoteTimer = useRef(null);
+  const lastBackendText = useRef('');
+
+  useEffect(() => {
+    currentScriptureRef.current = currentScripture;
+  }, [currentScripture]);
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
+  useEffect(() => {
+    autoProjectRef.current = autoProject;
+  }, [autoProject]);
+
+  useEffect(() => {
+    displayDurationRef.current = displayDuration;
+  }, [displayDuration]);
+
+  // Initialize broadcast channel for instant multi-tab syncing (Dashboard <-> Projection)
   useEffect(() => {
     try {
       channelRef.current = new BroadcastChannel('scripturelive_channel');
@@ -37,6 +80,8 @@ export const SocketProvider = ({ children }) => {
           setCurrentScripture(null);
         } else if (type === 'MIC_STATUS') {
           setIsMicListening(payload);
+        } else if (type === 'SCROLL_PROJECTION') {
+          setScrollCommand({ ...payload, ts: Date.now() });
         }
       };
     } catch (e) {
@@ -52,20 +97,18 @@ export const SocketProvider = ({ children }) => {
 
   // Socket.io initialization
   useEffect(() => {
-    // Connect to backend socket
     const socketInstance = io(API_BASE || window.location.origin, {
       path: '/socket.io',
       auth: {
         token: token || '',
       },
       transports: ['websocket', 'polling'],
-      reconnectionAttempts: 10,
+      reconnectionAttempts: 15,
       reconnectionDelay: 1000,
     });
 
     socketInstance.on('connect', () => {
       setIsConnected(true);
-      // Join church-specific room if user/churchId exists
       const churchId = user?.id || user?.churchId || 'public';
       socketInstance.emit('join-church', { churchId });
     });
@@ -74,10 +117,8 @@ export const SocketProvider = ({ children }) => {
       setIsConnected(false);
     });
 
-    // Listen for projection events
     socketInstance.on('scripture-detected', (data) => {
       setCurrentScripture(data);
-      // Also broadcast locally
       if (channelRef.current) {
         channelRef.current.postMessage({ type: 'SCRIPTURE_DETECTED', payload: data });
       }
@@ -90,10 +131,17 @@ export const SocketProvider = ({ children }) => {
       }
     });
 
+    socketInstance.on('scroll-projection', (data) => {
+      const cmd = { direction: data.direction || 'down', amount: data.amount || 260, ts: Date.now() };
+      setScrollCommand(cmd);
+      if (channelRef.current) {
+        channelRef.current.postMessage({ type: 'SCROLL_PROJECTION', payload: cmd });
+      }
+    });
+
     socketInstance.on('update-branding', (branding) => {
-      // Branding updated
-      if (user) {
-        user.branding = branding;
+      if (userRef.current) {
+        userRef.current.branding = branding;
       }
     });
 
@@ -105,58 +153,84 @@ export const SocketProvider = ({ children }) => {
   }, [token, user?.id, user?.churchId]);
 
   // Emit scripture detected to projection
-  const emitScriptureDetected = useCallback((scriptureData) => {
-    const payload = {
-      ...scriptureData,
-      translation: (scriptureData.translation || user?.preferredTranslation || 'KJV').toUpperCase(),
-      timestamp: new Date().toISOString(),
-      churchId: user?.id || user?.churchId || 'public',
-      churchName: scriptureData.churchName || user?.churchName || user?.name || 'Sanctuary Worship',
-      logoUrl: assetUrl(scriptureData.logoUrl || user?.logoUrl || ''),
-    };
+  const emitScriptureDetected = useCallback(
+    (scriptureData) => {
+      const activeUser = userRef.current;
+      const parsedCtx = parseReferenceContext(scriptureData);
 
-    setCurrentScripture(payload);
-    try {
-      localStorage.setItem('scripturelive_active_scripture', JSON.stringify(payload));
-    } catch {}
+      const payload = {
+        ...scriptureData,
+        book: scriptureData.book || scriptureData.bookName || parsedCtx?.bookName || '',
+        chapter: scriptureData.chapter || parsedCtx?.chapter || 1,
+        verse:
+          scriptureData.verse ||
+          scriptureData.startVerse ||
+          (parsedCtx
+            ? parsedCtx.endVerse > parsedCtx.startVerse
+              ? `${parsedCtx.startVerse}-${parsedCtx.endVerse}`
+              : parsedCtx.startVerse
+            : 1),
+        translation: (
+          scriptureData.translation ||
+          activeUser?.preferredTranslation ||
+          'KJV'
+        ).toUpperCase(),
+        timestamp: new Date().toISOString(),
+        churchId: activeUser?.id || activeUser?.churchId || 'public',
+        churchName:
+          scriptureData.churchName ||
+          activeUser?.churchName ||
+          activeUser?.name ||
+          'Sanctuary Worship',
+        logoUrl: assetUrl(scriptureData.logoUrl || activeUser?.logoUrl || ''),
+      };
 
-    // Cross-tab broadcast
-    if (channelRef.current) {
-      channelRef.current.postMessage({ type: 'SCRIPTURE_DETECTED', payload });
-    }
+      setCurrentScripture(payload);
+      currentScriptureRef.current = payload;
 
-    // Socket broadcast to room
-    if (socket && socket.connected) {
-      socket.emit('scripture-detected', payload);
-    }
+      try {
+        localStorage.setItem('scripturelive_active_scripture', JSON.stringify(payload));
+      } catch {}
 
-    // Auto-clear after displayDuration if set > 0
-    if (timerRef.current) clearTimeout(timerRef.current);
-    if (displayDuration > 0) {
-      timerRef.current = setTimeout(() => {
-        setCurrentScripture((prev) => {
-          if (prev?.reference === payload.reference) {
-            try {
-              localStorage.removeItem('scripturelive_active_scripture');
-            } catch {}
-            if (channelRef.current) {
-              channelRef.current.postMessage({ type: 'CLEAR_PROJECTION' });
+      if (channelRef.current) {
+        channelRef.current.postMessage({ type: 'SCRIPTURE_DETECTED', payload });
+      }
+
+      if (socket && socket.connected) {
+        socket.emit('scripture-detected', payload);
+      }
+
+      // Reset 5-minute (or custom) auto-clear timer
+      if (timerRef.current) clearTimeout(timerRef.current);
+      const dur = displayDurationRef.current;
+      if (dur > 0) {
+        timerRef.current = setTimeout(() => {
+          setCurrentScripture((prev) => {
+            if (prev?.reference === payload.reference) {
+              try {
+                localStorage.removeItem('scripturelive_active_scripture');
+              } catch {}
+              if (channelRef.current) {
+                channelRef.current.postMessage({ type: 'CLEAR_PROJECTION' });
+              }
+              if (socket && socket.connected) {
+                socket.emit('clear-projection', { churchId: payload.churchId });
+              }
+              return null;
             }
-            if (socket && socket.connected) {
-              socket.emit('clear-projection', { churchId: payload.churchId });
-            }
-            return null;
-          }
-          return prev;
-        });
-      }, displayDuration * 1000);
-    }
-  }, [socket, user, displayDuration]);
+            return prev;
+          });
+        }, dur * 1000);
+      }
+    },
+    [socket]
+  );
 
   // Emit clear projection
   const emitClearProjection = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
     setCurrentScripture(null);
+    currentScriptureRef.current = null;
     try {
       localStorage.removeItem('scripturelive_active_scripture');
     } catch {}
@@ -166,18 +240,39 @@ export const SocketProvider = ({ children }) => {
     }
 
     if (socket && socket.connected) {
-      const churchId = user?.id || user?.churchId || 'public';
+      const churchId = userRef.current?.id || userRef.current?.churchId || 'public';
       socket.emit('clear-projection', { churchId });
     }
-  }, [socket, user]);
+  }, [socket]);
+
+  // Emit scroll command to projector (up / down)
+  const emitScrollProjection = useCallback(
+    (direction = 'down', amount = 260) => {
+      const cmd = { direction, amount, ts: Date.now() };
+      setScrollCommand(cmd);
+
+      if (channelRef.current) {
+        channelRef.current.postMessage({ type: 'SCROLL_PROJECTION', payload: cmd });
+      }
+
+      if (socket && socket.connected) {
+        const churchId = userRef.current?.id || userRef.current?.churchId || 'public';
+        socket.emit('scroll-projection', { churchId, direction, amount });
+      }
+    },
+    [socket]
+  );
 
   // Update branding broadcast
-  const emitUpdateBranding = useCallback((branding) => {
-    if (socket && socket.connected) {
-      const churchId = user?.id || user?.churchId || 'public';
-      socket.emit('update-branding', { churchId, branding });
-    }
-  }, [socket, user]);
+  const emitUpdateBranding = useCallback(
+    (branding) => {
+      if (socket && socket.connected) {
+        const churchId = userRef.current?.id || userRef.current?.churchId || 'public';
+        socket.emit('update-branding', { churchId, branding });
+      }
+    },
+    [socket]
+  );
 
   // Broadcast mic status
   const broadcastMicStatus = useCallback((active) => {
@@ -187,6 +282,472 @@ export const SocketProvider = ({ children }) => {
     }
   }, []);
 
+  // Save scripture detection to history
+  const saveHistory = useCallback((entry, spokenText) => {
+    api
+      .post('/scripture/history', {
+        reference: entry.reference,
+        verseText: entry.text,
+        text: entry.text,
+        translation: entry.translation,
+        confidence: entry.confidence,
+        speechText: spokenText,
+        spokenText,
+      })
+      .catch(() => {});
+  }, []);
+
+  // Query backend quote engine
+  const runBackendDetection = useCallback(
+    async (phrase, currentTranslation, bypassCooldown = false) => {
+      const clean = phrase.trim();
+      if (!clean) return;
+      if (!bypassCooldown && clean === lastBackendText.current) return;
+      lastBackendText.current = clean;
+
+      try {
+        const res = await api.post('/bible/detect', {
+          text: clean,
+          translation: currentTranslation,
+          ignoreDebounce: bypassCooldown,
+        });
+
+        if (res.data && res.data.detected && res.data.reference) {
+          const data = res.data;
+          const now = Date.now();
+          if (
+            !bypassCooldown &&
+            lastDetectedRef.current === data.reference &&
+            now - lastDetectedTime.current < 2000
+          ) {
+            return;
+          }
+          lastDetectedRef.current = data.reference;
+          lastDetectedTime.current = now;
+
+          const newEntry = {
+            id: `${data.reference}_${Date.now()}`,
+            reference: data.reference,
+            text: data.text || data.verseText || '',
+            book: data.book || data.bookName || '',
+            chapter: data.chapter || '',
+            verse: data.verse || data.startVerse || '',
+            translation: (data.translation || currentTranslation).toUpperCase(),
+            confidence: data.confidence || 0.9,
+            matchedText: clean,
+            timestamp: new Date().toISOString(),
+          };
+
+          setSessionDetections((prev) => [newEntry, ...prev]);
+          saveHistory(newEntry, clean);
+
+          if (autoProjectRef.current) {
+            emitScriptureDetected(newEntry);
+            toast.success(`Projected: ${newEntry.reference} (${newEntry.translation})`, {
+              duration: 2800,
+            });
+          } else {
+            setPendingScripture(newEntry);
+            toast(`Scripture Ready: ${newEntry.reference}`, { icon: '📖' });
+          }
+        } else if (bypassCooldown) {
+          toast.error('No Bible reference, verse quote, or command matched that phrase.');
+        }
+      } catch (err) {
+        if (bypassCooldown) {
+          toast.error('Could not reach the scripture engine.');
+        }
+      }
+    },
+    [emitScriptureDetected, saveHistory]
+  );
+
+  // Unified Voice Transcript Processor (handles Full References, Relative Verse Navigation, Scroll Up/Down, Close/Clear, and Spoken Quotes)
+  const processVoiceTranscript = useCallback(
+    async (text, isFinal, bypassCooldown = false, rollingWindow = '') => {
+      if (!text || !text.trim()) return;
+      setLiveTranscript(text);
+
+      const currentTranslation = (userRef.current?.preferredTranslation || 'KJV').toUpperCase();
+
+      // 1. Check for Voice Control Commands first on the latest utterance (`text`):
+      //    - "close" / "clear" / "vanish"
+      //    - "scroll down" / "scroll up"
+      //    - "go to verse 4" / "navigate to verse 9" / "next verse" / or bare number "9" when on a scripture
+      const voiceCmd = detectVoiceCommand(text, currentScriptureRef.current);
+
+      if (voiceCmd) {
+        const now = Date.now();
+        const cmdKey =
+          voiceCmd.type === 'NAVIGATE'
+            ? `NAV_${voiceCmd.reference}`
+            : `${voiceCmd.type}_${voiceCmd.direction || ''}`;
+
+        // Avoid firing the exact same command twice within 1.1s during interim speech
+        const cooldownMs = voiceCmd.type === 'SCROLL' ? 950 : 1200;
+        if (
+          !bypassCooldown &&
+          lastCommandKey.current === cmdKey &&
+          now - lastCommandTime.current < cooldownMs
+        ) {
+          return;
+        }
+
+        // For bare single numbers ("9"), wait either for `isFinal` or a clean token match so "19" isn't cut at "1"
+        const isBareNumber = /^\s*\d{1,3}\s*$/.test(text);
+        if (isBareNumber && !isFinal && !bypassCooldown) {
+          return;
+        }
+
+        lastCommandKey.current = cmdKey;
+        lastCommandTime.current = now;
+
+        if (voiceCmd.type === 'CLEAR') {
+          emitClearProjection();
+          toast('Projection screen cleared', { icon: '✨', duration: 2200 });
+          return;
+        }
+
+        if (voiceCmd.type === 'SCROLL') {
+          emitScrollProjection(voiceCmd.direction, 280);
+          toast(`Scrolled ${voiceCmd.direction}`, { duration: 1500 });
+          return;
+        }
+
+        if (voiceCmd.type === 'NAVIGATE') {
+          try {
+            const res = await api.get(
+              `/bible/reference?ref=${encodeURIComponent(voiceCmd.reference)}&translation=${currentTranslation}`
+            );
+            const verseText = res.data?.text || res.data?.verses || '';
+            if (verseText) {
+              const resolvedRef = res.data?.reference || voiceCmd.reference;
+              lastDetectedRef.current = resolvedRef;
+              lastDetectedTime.current = now;
+
+              const newEntry = {
+                id: `${resolvedRef}_${Date.now()}`,
+                reference: resolvedRef,
+                text: verseText,
+                book: voiceCmd.bookName,
+                chapter: voiceCmd.chapter,
+                verse:
+                  voiceCmd.endVerse > voiceCmd.startVerse
+                    ? `${voiceCmd.startVerse}-${voiceCmd.endVerse}`
+                    : voiceCmd.startVerse,
+                translation: currentTranslation,
+                confidence: 0.98,
+                matchedText: text,
+                timestamp: new Date().toISOString(),
+              };
+
+              setSessionDetections((prev) => [newEntry, ...prev]);
+              saveHistory(newEntry, text);
+              emitScriptureDetected(newEntry);
+              toast.success(`Navigated to ${resolvedRef}`, { duration: 2500 });
+            } else if (bypassCooldown) {
+              toast.error(`Verse ${voiceCmd.reference} not found in this chapter.`);
+            }
+          } catch (e) {
+            if (bypassCooldown) {
+              toast.error(`Verse ${voiceCmd.reference} does not exist in this chapter.`);
+            }
+          }
+          return;
+        }
+      }
+
+      // 2. Check for Full Bible Scripture Reference ("Psalm 1 verse 2", "John 3:16")
+      const candidateText =
+        rollingWindow && rollingWindow.length > text.length ? rollingWindow : text;
+      const detected =
+        detectScripture(text) || (rollingWindow ? detectScripture(rollingWindow) : null);
+
+      if (detected) {
+        if (interimQuoteTimer.current) {
+          clearTimeout(interimQuoteTimer.current);
+          interimQuoteTimer.current = null;
+        }
+
+        const now = Date.now();
+        if (
+          !bypassCooldown &&
+          lastDetectedRef.current === detected.reference &&
+          now - lastDetectedTime.current < 2000
+        ) {
+          return;
+        }
+
+        lastDetectedRef.current = detected.reference;
+        lastDetectedTime.current = now;
+
+        let verseText = '';
+        try {
+          const res = await api.get(
+            `/bible/reference?ref=${encodeURIComponent(detected.reference)}&translation=${currentTranslation}`
+          );
+          if (res.data) {
+            verseText = res.data.text || res.data.verses || '';
+          }
+        } catch (e) {
+          verseText = '';
+        }
+
+        if (!verseText) return;
+
+        const newEntry = {
+          id: `${detected.reference}_${Date.now()}`,
+          reference: detected.reference,
+          text: verseText,
+          book: detected.bookName,
+          chapter: detected.chapter,
+          verse:
+            detected.endVerse > detected.startVerse
+              ? `${detected.startVerse}-${detected.endVerse}`
+              : detected.startVerse,
+          translation: currentTranslation,
+          confidence: detected.confidence,
+          matchedText: detected.matchedText,
+          timestamp: new Date().toISOString(),
+        };
+
+        setSessionDetections((prev) => [newEntry, ...prev]);
+        saveHistory(newEntry, text);
+
+        if (autoProjectRef.current) {
+          emitScriptureDetected(newEntry);
+          toast.success(`Projected: ${newEntry.reference} (${currentTranslation})`, {
+            duration: 2800,
+          });
+        } else {
+          setPendingScripture(newEntry);
+          toast(`Scripture Ready: ${newEntry.reference}`, { icon: '📖' });
+        }
+        return;
+      }
+
+      // 3. Spoken Scripture Quote Detection
+      const wordCount = candidateText.trim().split(/\s+/).length;
+      if (isFinal) {
+        if (interimQuoteTimer.current) {
+          clearTimeout(interimQuoteTimer.current);
+          interimQuoteTimer.current = null;
+        }
+        await runBackendDetection(candidateText, currentTranslation, bypassCooldown);
+      } else if (wordCount >= 5) {
+        if (interimQuoteTimer.current) clearTimeout(interimQuoteTimer.current);
+        interimQuoteTimer.current = setTimeout(() => {
+          runBackendDetection(candidateText, currentTranslation, false);
+        }, 320);
+      }
+    },
+    [emitClearProjection, emitScrollProjection, emitScriptureDetected, runBackendDetection, saveHistory]
+  );
+
+  const processVoiceTranscriptRef = useRef(processVoiceTranscript);
+  useEffect(() => {
+    processVoiceTranscriptRef.current = processVoiceTranscript;
+  }, [processVoiceTranscript]);
+
+  // Global Microphone Engine (persists across Dashboard, Bible Browser, AND Projection Screen)
+  const setupAudioAnalyser = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+      mediaStreamRef.current = stream;
+
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      const audioCtx = new AudioContext();
+      audioContextRef.current = audioCtx;
+
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      analyserRef.current = analyser;
+
+      const source = audioCtx.createMediaStreamSource(stream);
+      source.connect(analyser);
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+      const updateLevel = () => {
+        if (!shouldListenRef.current) return;
+        analyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          sum += dataArray[i];
+        }
+        setAudioLevel(sum / dataArray.length);
+        animationFrameRef.current = requestAnimationFrame(updateLevel);
+      };
+
+      updateLevel();
+    } catch (err) {
+      console.warn('Microphone stream access error:', err);
+    }
+  }, []);
+
+  const stopGlobalListening = useCallback(() => {
+    shouldListenRef.current = false;
+    setIsMicListening(false);
+    broadcastMicStatus(false);
+
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.onend = null;
+        recognitionRef.current.stop();
+      } catch {}
+      recognitionRef.current = null;
+    }
+
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+    }
+
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+      mediaStreamRef.current = null;
+    }
+
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+
+    setAudioLevel(0);
+  }, [broadcastMicStatus]);
+
+  const startGlobalListening = useCallback(
+    async (silentToast = false) => {
+      const SpeechRecognition =
+        window.SpeechRecognition || window.webkitSpeechRecognition;
+
+      if (!SpeechRecognition) {
+        if (!silentToast) {
+          toast.error(
+            'Voice recognition is not supported in this browser. Please use Google Chrome, Edge, or Safari.'
+          );
+        }
+        return false;
+      }
+
+      if (shouldListenRef.current && recognitionRef.current) {
+        return true;
+      }
+
+      try {
+        shouldListenRef.current = true;
+        setIsMicListening(true);
+        broadcastMicStatus(true);
+
+        const createAndStartRecognition = () => {
+          if (!shouldListenRef.current) return;
+
+          const recognition = new SpeechRecognition();
+          recognition.continuous = true;
+          recognition.interimResults = true;
+          recognition.maxAlternatives = 3;
+          recognition.lang = 'en-US';
+
+          recognition.onresult = (event) => {
+            let interimTranscript = '';
+            let finalTranscript = '';
+
+            const startIdx = Math.max(0, event.resultIndex - 1);
+            let rollingWindow = '';
+
+            for (let i = startIdx; i < event.results.length; ++i) {
+              const bestPiece = event.results[i][0].transcript;
+              rollingWindow += ' ' + bestPiece;
+
+              if (i >= event.resultIndex) {
+                if (event.results[i].isFinal) {
+                  finalTranscript += bestPiece;
+                } else {
+                  interimTranscript += bestPiece;
+                }
+              }
+            }
+
+            if (processVoiceTranscriptRef.current) {
+              if (finalTranscript.trim()) {
+                processVoiceTranscriptRef.current(
+                  finalTranscript.trim(),
+                  true,
+                  false,
+                  rollingWindow.trim()
+                );
+              } else if (interimTranscript.trim()) {
+                processVoiceTranscriptRef.current(
+                  interimTranscript.trim(),
+                  false,
+                  false,
+                  rollingWindow.trim()
+                );
+              }
+            }
+          };
+
+          recognition.onerror = (event) => {
+            if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+              if (!silentToast) {
+                toast.error('Microphone access was denied. Please allow microphone permissions.');
+              }
+              stopGlobalListening();
+            }
+          };
+
+          recognition.onend = () => {
+            if (shouldListenRef.current) {
+              setTimeout(() => {
+                if (!shouldListenRef.current) return;
+                try {
+                  recognition.start();
+                } catch {
+                  try {
+                    createAndStartRecognition();
+                  } catch {}
+                }
+              }, 50);
+            }
+          };
+
+          recognitionRef.current = recognition;
+          try {
+            recognition.start();
+          } catch {}
+        };
+
+        createAndStartRecognition();
+        setupAudioAnalyser();
+        if (!silentToast) {
+          toast.success('Voice capture active — listening for scriptures & commands');
+        }
+        return true;
+      } catch (err) {
+        console.error('Failed to start voice capture:', err);
+        shouldListenRef.current = false;
+        setIsMicListening(false);
+        broadcastMicStatus(false);
+        return false;
+      }
+    },
+    [broadcastMicStatus, setupAudioAnalyser, stopGlobalListening]
+  );
+
+  const toggleGlobalListening = useCallback(() => {
+    if (shouldListenRef.current) {
+      stopGlobalListening();
+      toast('Microphone paused');
+    } else {
+      startGlobalListening(false);
+    }
+  }, [startGlobalListening, stopGlobalListening]);
+
   const value = {
     socket,
     isConnected,
@@ -194,6 +755,7 @@ export const SocketProvider = ({ children }) => {
     setCurrentScripture,
     emitScriptureDetected,
     emitClearProjection,
+    emitScrollProjection,
     emitUpdateBranding,
     displayDuration,
     setDisplayDuration,
@@ -201,6 +763,18 @@ export const SocketProvider = ({ children }) => {
     setLiveTranscript,
     isMicListening,
     broadcastMicStatus,
+    audioLevel,
+    autoProject,
+    setAutoProject,
+    pendingScripture,
+    setPendingScripture,
+    sessionDetections,
+    setSessionDetections,
+    scrollCommand,
+    processVoiceTranscript,
+    startGlobalListening,
+    stopGlobalListening,
+    toggleGlobalListening,
   };
 
   return <SocketContext.Provider value={value}>{children}</SocketContext.Provider>;

@@ -1,12 +1,9 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState } from 'react';
 import { useSocket } from '../../contexts/SocketContext';
-import { useAuth } from '../../contexts/AuthContext';
 import MicrophoneControl from './MicrophoneControl';
 import SpeechVisualizer from './SpeechVisualizer';
 import DetectionLog from './DetectionLog';
 import ProjectionPreview from '../Projection/ProjectionPreview';
-import detectScripture from '../../utils/scriptureDetector';
-import api from '../../utils/api';
 import {
   Mic,
   Clock,
@@ -18,217 +15,38 @@ import {
 import toast from 'react-hot-toast';
 
 const SAMPLE_UTTERANCES = [
+  'Psalm 1 verse 2',
+  'Go to verse 4',
+  '9',
+  'Scroll down',
+  'Scroll up',
   'Turn with me to John chapter 3 verse 16',
   'For God so loved the world that he gave his only begotten Son',
-  'Open your Bible to Psalm twenty three verse one',
-  'The Lord is my shepherd I shall not want',
-  'Romans chapter 8 verse 28',
-  'I can do all things through Christ which strengtheneth me',
+  'Close',
 ];
 
 const LiveDetection = () => {
-  const { user } = useAuth();
   const {
     emitScriptureDetected,
     emitClearProjection,
     currentScripture,
     displayDuration,
     setDisplayDuration,
-    broadcastMicStatus,
+    liveTranscript,
+    setLiveTranscript,
+    isMicListening,
+    audioLevel,
+    autoProject,
+    setAutoProject,
+    pendingScripture,
+    setPendingScripture,
+    sessionDetections,
+    setSessionDetections,
+    processVoiceTranscript,
   } = useSocket();
 
-  const [audioLevel, setAudioLevel] = useState(0);
-  const [isListening, setIsListening] = useState(false);
-  const [liveTranscript, setLiveTranscript] = useState('');
   const [manualInput, setManualInput] = useState('');
   const [isAnalyzingManual, setIsAnalyzingManual] = useState(false);
-  const [pendingScripture, setPendingScripture] = useState(null);
-  const [sessionDetections, setSessionDetections] = useState([]);
-  const [autoProject, setAutoProject] = useState(true);
-
-  // Fast deduplication & interim quote debounce refs
-  const lastDetectedRef = useRef('');
-  const lastDetectedTime = useRef(0);
-  const interimQuoteTimer = useRef(null);
-  const lastBackendText = useRef('');
-
-  // Sync mic state to socket context for top header
-  const handleStatusChange = (status) => {
-    setIsListening(status);
-    broadcastMicStatus(status);
-  };
-
-  // Helper to log detection to backend history
-  const saveHistory = useCallback((entry, spokenText) => {
-    api
-      .post('/scripture/history', {
-        reference: entry.reference,
-        verseText: entry.text,
-        text: entry.text,
-        translation: entry.translation,
-        confidence: entry.confidence,
-        speechText: spokenText,
-        spokenText,
-      })
-      .catch(() => {});
-  }, []);
-
-  // Query backend quote engine (called immediately on final speech or after 320ms of interim speech)
-  const runBackendDetection = useCallback(
-    async (phrase, currentTranslation, bypassCooldown = false) => {
-      const clean = phrase.trim();
-      if (!clean) return;
-      if (!bypassCooldown && clean === lastBackendText.current) return;
-      lastBackendText.current = clean;
-
-      try {
-        const res = await api.post('/bible/detect', {
-          text: clean,
-          translation: currentTranslation,
-          ignoreDebounce: bypassCooldown,
-        });
-
-        if (res.data && res.data.detected && res.data.reference) {
-          const data = res.data;
-          const now = Date.now();
-          if (
-            !bypassCooldown &&
-            lastDetectedRef.current === data.reference &&
-            now - lastDetectedTime.current < 2200
-          ) {
-            return;
-          }
-          lastDetectedRef.current = data.reference;
-          lastDetectedTime.current = now;
-
-          const newEntry = {
-            id: `${data.reference}_${Date.now()}`,
-            reference: data.reference,
-            text: data.text || data.verseText || '',
-            book: data.book || data.bookName || '',
-            chapter: data.chapter || '',
-            verse: data.verse || data.startVerse || '',
-            translation: (data.translation || currentTranslation).toUpperCase(),
-            confidence: data.confidence || 0.9,
-            matchedText: clean,
-            timestamp: new Date().toISOString(),
-          };
-
-          setSessionDetections((prev) => [newEntry, ...prev]);
-          saveHistory(newEntry, clean);
-
-          if (autoProject) {
-            emitScriptureDetected(newEntry);
-            toast.success(`Projected: ${newEntry.reference} (${newEntry.translation})`, {
-              duration: 3000,
-            });
-          } else {
-            setPendingScripture(newEntry);
-            toast(`Scripture Ready: ${newEntry.reference}`, { icon: '📖' });
-          }
-        } else if (bypassCooldown) {
-          toast.error('No Bible reference or verse quote matched that phrase.');
-        }
-      } catch (err) {
-        if (bypassCooldown) {
-          toast.error('Could not reach the scripture engine.');
-        }
-      }
-    },
-    [autoProject, emitScriptureDetected, saveHistory]
-  );
-
-  // Process live transcript (instant on both interim and final speech)
-  const handleTranscript = useCallback(
-    async (text, isFinal, bypassCooldown = false, rollingWindow = '') => {
-      if (!text || !text.trim()) return;
-      setLiveTranscript(text);
-
-      const currentTranslation = (user?.preferredTranslation || 'KJV').toUpperCase();
-      const candidateText = rollingWindow && rollingWindow.length > text.length ? rollingWindow : text;
-
-      // 1. Instant client-side reference detection (0ms latency on interim speech)
-      const detected = detectScripture(text) || (rollingWindow ? detectScripture(rollingWindow) : null);
-
-      if (detected) {
-        if (interimQuoteTimer.current) {
-          clearTimeout(interimQuoteTimer.current);
-          interimQuoteTimer.current = null;
-        }
-
-        const now = Date.now();
-        if (
-          !bypassCooldown &&
-          lastDetectedRef.current === detected.reference &&
-          now - lastDetectedTime.current < 2200
-        ) {
-          return;
-        }
-
-        lastDetectedRef.current = detected.reference;
-        lastDetectedTime.current = now;
-
-        let verseText = '';
-        try {
-          const res = await api.get(
-            `/bible/reference?ref=${encodeURIComponent(detected.reference)}&translation=${currentTranslation}`
-          );
-          if (res.data) {
-            verseText = res.data.text || res.data.verses || '';
-          }
-        } catch (e) {
-          verseText = '';
-        }
-
-        if (!verseText) return;
-
-        const newEntry = {
-          id: `${detected.reference}_${Date.now()}`,
-          reference: detected.reference,
-          text: verseText,
-          book: detected.bookName,
-          chapter: detected.chapter,
-          verse: detected.startVerse,
-          translation: currentTranslation,
-          confidence: detected.confidence,
-          matchedText: detected.matchedText,
-          timestamp: new Date().toISOString(),
-        };
-
-        setSessionDetections((prev) => [newEntry, ...prev]);
-        saveHistory(newEntry, text);
-
-        if (autoProject) {
-          emitScriptureDetected(newEntry);
-          toast.success(`Projected: ${newEntry.reference} (${currentTranslation})`, {
-            duration: 3000,
-          });
-        } else {
-          setPendingScripture(newEntry);
-          toast(`Detected: ${newEntry.reference} (Awaiting confirmation)`, {
-            icon: '📖',
-          });
-        }
-        return;
-      }
-
-      // 2. Spoken Scripture Quote Detection (works during live speech without waiting for a long pause)
-      const wordCount = candidateText.trim().split(/\s+/).length;
-      if (isFinal) {
-        if (interimQuoteTimer.current) {
-          clearTimeout(interimQuoteTimer.current);
-          interimQuoteTimer.current = null;
-        }
-        await runBackendDetection(candidateText, currentTranslation, bypassCooldown);
-      } else if (wordCount >= 5) {
-        if (interimQuoteTimer.current) clearTimeout(interimQuoteTimer.current);
-        interimQuoteTimer.current = setTimeout(() => {
-          runBackendDetection(candidateText, currentTranslation, false);
-        }, 320);
-      }
-    },
-    [autoProject, emitScriptureDetected, runBackendDetection, saveHistory, user]
-  );
 
   // Trigger manual speech or quick reference test
   const handleManualSubmit = async (e) => {
@@ -236,7 +54,7 @@ const LiveDetection = () => {
     if (!manualInput.trim()) return;
     setIsAnalyzingManual(true);
     try {
-      await handleTranscript(manualInput.trim(), true, true);
+      await processVoiceTranscript(manualInput.trim(), true, true);
       setManualInput('');
     } finally {
       setIsAnalyzingManual(false);
@@ -247,7 +65,7 @@ const LiveDetection = () => {
     setManualInput(phrase);
     setIsAnalyzingManual(true);
     try {
-      await handleTranscript(phrase, true, true);
+      await processVoiceTranscript(phrase, true, true);
     } finally {
       setIsAnalyzingManual(false);
     }
@@ -277,8 +95,7 @@ const LiveDetection = () => {
             <span>Live Voice Scripture Capture</span>
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            High-speed voice recognition listens to the sermon, captures Bible references and
-            spoken verses, and projects them immediately.
+            Speak any scripture, navigate verses by voice ("go to verse 4", "9"), scroll ("scroll down/up"), or say "close".
           </p>
         </div>
 
@@ -304,12 +121,11 @@ const LiveDetection = () => {
               onChange={(e) => setDisplayDuration(Number(e.target.value))}
               className="bg-navy-950 border border-navy-800 rounded-lg px-2 py-1 text-white font-semibold focus:outline-none focus:border-gold-500"
             >
-              <option value={3}>3 Seconds</option>
-              <option value={5}>5 Seconds</option>
-              <option value={10}>10 Seconds</option>
-              <option value={15}>15 Seconds</option>
-              <option value={30}>30 Seconds</option>
+              <option value={300}>5 Minutes (Default)</option>
+              <option value={180}>3 Minutes</option>
               <option value={60}>1 Minute</option>
+              <option value={30}>30 Seconds</option>
+              <option value={15}>15 Seconds</option>
               <option value={0}>Permanent (Until Cleared)</option>
             </select>
           </div>
@@ -334,15 +150,11 @@ const LiveDetection = () => {
         <div className="lg:col-span-7 space-y-6">
           {/* Mic Card */}
           <div className="bg-navy-900 border border-navy-800 rounded-2xl p-8 shadow-xl flex flex-col items-center justify-center relative overflow-hidden">
-            <MicrophoneControl
-              onTranscript={handleTranscript}
-              onAudioLevel={(lvl) => setAudioLevel(lvl)}
-              onStatusChange={handleStatusChange}
-            />
+            <MicrophoneControl />
 
             {/* Audio Waveform */}
             <div className="w-full mt-6">
-              <SpeechVisualizer isActive={isListening} audioLevel={audioLevel} />
+              <SpeechVisualizer isActive={isMicListening} audioLevel={audioLevel} />
             </div>
           </div>
 
@@ -352,7 +164,7 @@ const LiveDetection = () => {
               <div className="flex items-center gap-2">
                 <Volume2 className="w-4 h-4 text-gold-400" />
                 <h3 className="text-xs font-bold uppercase tracking-wider text-white font-display">
-                  Live Voice Transcript & Operator Quick Entry
+                  Live Voice Transcript & Operator Command Bar
                 </h3>
               </div>
               {liveTranscript && (
@@ -373,21 +185,21 @@ const LiveDetection = () => {
                 </p>
               ) : (
                 <p className="text-xs text-slate-500 italic text-center py-3">
-                  {isListening
-                    ? 'Listening live... Speak a Bible reference or quote a verse...'
-                    : 'Activate the microphone above, or type a reference/quote below.'}
+                  {isMicListening
+                    ? 'Listening live... Speak a scripture, say "go to verse 4" or "9", "scroll down", or "close"...'
+                    : 'Activate the microphone above (or directly inside the Projector screen), or test a command below.'}
                 </p>
               )}
             </div>
 
-            {/* Operator Quick Reference / Quote Input */}
+            {/* Operator Quick Reference / Command Input */}
             <form onSubmit={handleManualSubmit} className="space-y-2.5 pt-1">
               <div className="flex items-center gap-2">
                 <input
                   type="text"
                   value={manualInput}
                   onChange={(e) => setManualInput(e.target.value)}
-                  placeholder='Type a spoken reference or verse quote (e.g. "John 3:16" or "For God so loved the world...")'
+                  placeholder='Type a scripture or voice command ("Psalm 1:2", "go to verse 4", "9", "scroll down", "close")...'
                   className="flex-1 px-3.5 py-2 bg-navy-950 border border-navy-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-gold-500"
                 />
                 <button
@@ -396,14 +208,14 @@ const LiveDetection = () => {
                   className="px-4 py-2 rounded-xl bg-gold-500 hover:bg-gold-400 disabled:opacity-50 text-navy-950 text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer"
                 >
                   <Send className="w-3.5 h-3.5" />
-                  <span>Project Verse</span>
+                  <span>Run</span>
                 </button>
               </div>
 
-              {/* Quick Sample Phrases */}
+              {/* Quick Sample Phrases & Commands */}
               <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="text-[11px] font-semibold text-slate-400 mr-1">
-                  Quick test phrases:
+                  Try voice commands:
                 </span>
                 {SAMPLE_UTTERANCES.map((sample) => (
                   <button

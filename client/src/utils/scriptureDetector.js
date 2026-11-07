@@ -231,4 +231,202 @@ export function detectScripture(transcript) {
   return results.sort((a, b) => b.confidence - a.confidence || b.position - a.position)[0];
 }
 
+/**
+ * Parse a reference string like "Psalms 1:2" or "1 Corinthians 13:4-7" into { bookName, chapter, startVerse, endVerse }
+ */
+export function parseReferenceContext(refOrScripture) {
+  if (!refOrScripture) return null;
+  if (typeof refOrScripture === 'object') {
+    const bookName = refOrScripture.book || refOrScripture.bookName;
+    const chapter = parseInt(refOrScripture.chapter, 10);
+    let startVerse = 1;
+    let endVerse = 1;
+    if (refOrScripture.verse !== undefined && refOrScripture.verse !== null) {
+      const vStr = String(refOrScripture.verse);
+      const m = /^(\d+)(?:\s*-\s*(\d+))?$/.exec(vStr);
+      if (m) {
+        startVerse = parseInt(m[1], 10);
+        endVerse = m[2] ? parseInt(m[2], 10) : startVerse;
+      }
+    }
+    if (bookName && chapter) {
+      return { bookName, chapter, startVerse, endVerse };
+    }
+    if (refOrScripture.reference) {
+      return parseReferenceContext(refOrScripture.reference);
+    }
+    return null;
+  }
+
+  const parsed = detectScripture(String(refOrScripture));
+  if (!parsed) return null;
+  return {
+    bookName: parsed.bookName,
+    chapter: parsed.chapter,
+    startVerse: parsed.startVerse || 1,
+    endVerse: parsed.endVerse || parsed.startVerse || 1,
+  };
+}
+
+/**
+ * Detect spoken voice commands when a scripture is active or on the projector:
+ * - Close / Clear: "close", "clear", "clear screen", "close projection", "vanish", "hide", "remove", "dismiss"
+ * - Scroll: "scroll down", "scroll up", "page down", "page up", "move down", "move up"
+ * - Next / Previous Verse: "next verse", "previous verse", "prev verse", "go back", "next"
+ * - Relative Chapter/Verse Navigation (when activeScripture is present):
+ *   - "go to verse 4", "navigate to verse 9", "jump to verse 6", "read verse 5", "from verse 3 to 7", "verse 4"
+ *   - Bare spoken number when already on a scripture: "9", "nine", "4", "four" -> jumps to verse 9 / verse 4 of active chapter!
+ *   - "chapter 2 verse 3" or "go to chapter 4" -> jumps to that chapter in the active book!
+ */
+export function detectVoiceCommand(transcript, activeScripture = null) {
+  if (!transcript || typeof transcript !== 'string') return null;
+
+  let raw = transcript.toLowerCase().trim();
+  if (!raw) return null;
+
+  // Normalize punctuation and number words
+  let s = raw.replace(/(\d+)\s*[:.]\s*(\d+)/g, '$1 verse $2');
+  s = s.replace(/(\d+)\s*[-\u2013\u2014]\s*(\d+)/g, '$1 to $2');
+  s = s.replace(/['\u2019]/g, '');
+  s = s.replace(/[^a-z0-9\s]/g, ' ');
+  const tokens = convertNumberWords(s.split(/\s+/).filter(Boolean));
+  if (tokens.length === 0) return null;
+  const joined = tokens.join(' ');
+
+  // 1. Check if the utterance contains a full Bible Book reference first; if so, let detectScripture handle it
+  if (detectScripture(transcript)) {
+    return null;
+  }
+
+  // 2. Close / Clear / Vanish commands
+  if (
+    /\b(close|clear|vanish|hide|dismiss|stop projecting|remove scripture|close screen|clear screen|close projector|off screen)\b/.test(
+      joined
+    )
+  ) {
+    return { type: 'CLEAR' };
+  }
+
+  // 3. Scroll Up / Scroll Down commands
+  if (
+    /\b(scroll down|page down|move down|go down|slide down|down a bit|scroll to bottom)\b/.test(
+      joined
+    )
+  ) {
+    return { type: 'SCROLL', direction: 'down' };
+  }
+  if (
+    /\b(scroll up|page up|move up|go up|slide up|up a bit|scroll to top|back to top)\b/.test(
+      joined
+    )
+  ) {
+    return { type: 'SCROLL', direction: 'up' };
+  }
+
+  // 4. Contextual navigation commands (requires an active scripture on screen)
+  const ctx = parseReferenceContext(activeScripture);
+  if (!ctx) return null;
+
+  // 4a. Next / Previous verse
+  if (/\b(next verse|next one|continue to next|go to next|read next|forward)\b/.test(joined) || joined === 'next') {
+    const nextV = (ctx.endVerse || ctx.startVerse || 1) + 1;
+    return {
+      type: 'NAVIGATE',
+      bookName: ctx.bookName,
+      chapter: ctx.chapter,
+      startVerse: nextV,
+      endVerse: nextV,
+      reference: `${ctx.bookName} ${ctx.chapter}:${nextV}`,
+    };
+  }
+
+  if (/\b(previous verse|prev verse|last verse|go back|previous|back one verse)\b/.test(joined)) {
+    const prevV = Math.max(1, (ctx.startVerse || 1) - 1);
+    return {
+      type: 'NAVIGATE',
+      bookName: ctx.bookName,
+      chapter: ctx.chapter,
+      startVerse: prevV,
+      endVerse: prevV,
+      reference: `${ctx.bookName} ${ctx.chapter}:${prevV}`,
+    };
+  }
+
+  // 4b. Chapter + optional verse navigation within current book ("go to chapter 2 verse 4" or "chapter 3")
+  const chapMatch = /\b(?:go to|navigate to|open|jump to|switch to)?\s*chapter\s+(\d{1,3})(?:\s+verse\s+(\d{1,3})(?:\s+(?:to|through|and)\s+(?:verse\s+)?(\d{1,3}))?)?\b/.exec(
+    joined
+  );
+  if (chapMatch) {
+    const ch = parseInt(chapMatch[1], 10);
+    const vStart = chapMatch[2] ? parseInt(chapMatch[2], 10) : 1;
+    const vEnd = chapMatch[3] ? parseInt(chapMatch[3], 10) : vStart;
+    const ref =
+      vEnd > vStart
+        ? `${ctx.bookName} ${ch}:${vStart}-${vEnd}`
+        : `${ctx.bookName} ${ch}:${vStart}`;
+    return {
+      type: 'NAVIGATE',
+      bookName: ctx.bookName,
+      chapter: ch,
+      startVerse: vStart,
+      endVerse: vEnd,
+      reference: ref,
+    };
+  }
+
+  // 4c. Explicit verse navigation within current book & chapter:
+  // e.g. "go to verse 4", "navigate to verse 9", "verse 4", "verse 4 to 7", "go to 4", "navigate to 9", "jump to 5"
+  const verseNavMatch =
+    /\b(?:go to|navigate to|jump to|move to|read|show|project|from)?\s*(?:verse|verses|vs|v)\s+(\d{1,3})(?:\s+(?:to|through|thru|and)\s+(?:verse\s+)?(\d{1,3}))?\b/.exec(
+      joined
+    ) ||
+    /\b(?:go to|navigate to|jump to|move to|verse)\s+(\d{1,3})(?:\s+(?:to|through|thru|and)\s+(\d{1,3}))?\b/.exec(
+      joined
+    );
+
+  if (verseNavMatch) {
+    const vStart = parseInt(verseNavMatch[1], 10);
+    const vEnd = verseNavMatch[2] ? parseInt(verseNavMatch[2], 10) : vStart;
+    if (vStart >= 1 && vStart <= 176) {
+      const endClamped = vEnd >= vStart && vEnd <= 176 ? vEnd : vStart;
+      const ref =
+        endClamped > vStart
+          ? `${ctx.bookName} ${ctx.chapter}:${vStart}-${endClamped}`
+          : `${ctx.bookName} ${ctx.chapter}:${vStart}`;
+      return {
+        type: 'NAVIGATE',
+        bookName: ctx.bookName,
+        chapter: ctx.chapter,
+        startVerse: vStart,
+        endVerse: endClamped,
+        reference: ref,
+      };
+    }
+  }
+
+  // 4d. Bare number spoken when already on a scripture (e.g., user says "9" or "nine" or "9 to 12")
+  const bareNumMatch = /^(\d{1,3})(?:\s+(?:to|through|and)\s+(\d{1,3}))?$/.exec(joined);
+  if (bareNumMatch) {
+    const vStart = parseInt(bareNumMatch[1], 10);
+    const vEnd = bareNumMatch[2] ? parseInt(bareNumMatch[2], 10) : vStart;
+    if (vStart >= 1 && vStart <= 176) {
+      const endClamped = vEnd >= vStart && vEnd <= 176 ? vEnd : vStart;
+      const ref =
+        endClamped > vStart
+          ? `${ctx.bookName} ${ctx.chapter}:${vStart}-${endClamped}`
+          : `${ctx.bookName} ${ctx.chapter}:${vStart}`;
+      return {
+        type: 'NAVIGATE',
+        bookName: ctx.bookName,
+        chapter: ctx.chapter,
+        startVerse: vStart,
+        endVerse: endClamped,
+        reference: ref,
+      };
+    }
+  }
+
+  return null;
+}
+
 export default detectScripture;
