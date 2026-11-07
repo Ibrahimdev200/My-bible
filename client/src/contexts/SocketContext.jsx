@@ -93,7 +93,7 @@ export const SocketProvider = ({ children }) => {
                 try {
                   recognitionRef.current.onend = null;
                   recognitionRef.current.stop();
-                } catch {}
+                } catch { }
                 recognitionRef.current = null;
               }
               if (animationFrameRef.current) {
@@ -104,7 +104,7 @@ export const SocketProvider = ({ children }) => {
                 mediaStreamRef.current = null;
               }
               if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-                audioContextRef.current.close().catch(() => {});
+                audioContextRef.current.close().catch(() => { });
                 audioContextRef.current = null;
               }
             }
@@ -123,7 +123,7 @@ export const SocketProvider = ({ children }) => {
               try {
                 recognitionRef.current.onend = null;
                 recognitionRef.current.stop();
-              } catch {}
+              } catch { }
               recognitionRef.current = null;
             }
             if (animationFrameRef.current) {
@@ -134,7 +134,7 @@ export const SocketProvider = ({ children }) => {
               mediaStreamRef.current = null;
             }
             if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-              audioContextRef.current.close().catch(() => {});
+              audioContextRef.current.close().catch(() => { });
               audioContextRef.current = null;
             }
           }
@@ -246,7 +246,7 @@ export const SocketProvider = ({ children }) => {
 
       try {
         localStorage.setItem('scripturelive_active_scripture', JSON.stringify(payload));
-      } catch {}
+      } catch { }
 
       if (channelRef.current) {
         channelRef.current.postMessage({ type: 'SCRIPTURE_DETECTED', payload });
@@ -265,7 +265,7 @@ export const SocketProvider = ({ children }) => {
             if (prev?.reference === payload.reference) {
               try {
                 localStorage.removeItem('scripturelive_active_scripture');
-              } catch {}
+              } catch { }
               if (channelRef.current) {
                 channelRef.current.postMessage({ type: 'CLEAR_PROJECTION' });
               }
@@ -289,7 +289,7 @@ export const SocketProvider = ({ children }) => {
     currentScriptureRef.current = null;
     try {
       localStorage.removeItem('scripturelive_active_scripture');
-    } catch {}
+    } catch { }
 
     if (channelRef.current) {
       channelRef.current.postMessage({ type: 'CLEAR_PROJECTION' });
@@ -354,7 +354,7 @@ export const SocketProvider = ({ children }) => {
         speechText: spokenText,
         spokenText,
       })
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   // Query backend quote engine
@@ -674,7 +674,7 @@ export const SocketProvider = ({ children }) => {
       try {
         recognitionRef.current.onend = null;
         recognitionRef.current.stop();
-      } catch {}
+      } catch { }
       recognitionRef.current = null;
     }
 
@@ -688,7 +688,7 @@ export const SocketProvider = ({ children }) => {
     }
 
     if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current.close().catch(() => { });
       audioContextRef.current = null;
     }
 
@@ -729,7 +729,7 @@ export const SocketProvider = ({ children }) => {
               recognitionRef.current.onerror = null;
               recognitionRef.current.onresult = null;
               recognitionRef.current.stop();
-            } catch {}
+            } catch { }
             recognitionRef.current = null;
           }
 
@@ -798,38 +798,38 @@ export const SocketProvider = ({ children }) => {
                 } catch {
                   try {
                     createAndStartRecognition();
-                  } catch {}
+                  } catch { }
                 }
-              }, 120);
-            }
+            }, 120);
+}
           };
 
-          recognitionRef.current = recognition;
-          try {
-            recognition.start();
-          } catch {}
+recognitionRef.current = recognition;
+try {
+  recognition.start();
+} catch { }
         };
 
-        // Call synchronously inside user click gesture so Chrome/Edge never blocks SpeechRecognition.start()
-        createAndStartRecognition();
-        setupAudioAnalyser();
+// Call synchronously inside user click gesture so Chrome/Edge never blocks SpeechRecognition.start()
+createAndStartRecognition();
+setupAudioAnalyser();
 
-        if (!silentToast) {
-          toast.success('Voice capture active — listening for scriptures & commands');
-        }
-        return true;
+if (!silentToast) {
+  toast.success('Voice capture active — listening for scriptures & commands');
+}
+return true;
       } catch (err) {
-        console.error('Failed to start voice capture:', err);
-        shouldListenRef.current = false;
-        setIsMicListening(false);
-        broadcastMicStatus(false);
-        return false;
-      }
+  console.error('Failed to start voice capture:', err);
+  shouldListenRef.current = false;
+  setIsMicListening(false);
+  broadcastMicStatus(false);
+  return false;
+}
     },
-    [broadcastMicStatus, setupAudioAnalyser, stopGlobalListening]
+[broadcastMicStatus, setupAudioAnalyser, stopGlobalListening]
   );
 
-  const toggleGlobalListening = useCallback(() => {
+const toggleGlobalListening = useCallback(() => {
     if (shouldListenRef.current || isMicListening) {
       stopGlobalListening();
       toast('Microphone paused');
@@ -838,36 +838,36 @@ export const SocketProvider = ({ children }) => {
     }
   }, [isMicListening, startGlobalListening, stopGlobalListening]);
 
-  const value = {
-    socket,
-    isConnected,
-    currentScripture,
-    setCurrentScripture,
-    emitScriptureDetected,
-    emitClearProjection,
-    emitScrollProjection,
-    emitUpdateBranding,
-    displayDuration,
-    setDisplayDuration,
-    liveTranscript,
-    setLiveTranscript,
-    isMicListening,
-    broadcastMicStatus,
-    audioLevel,
-    autoProject,
-    setAutoProject,
-    pendingScripture,
-    setPendingScripture,
-    sessionDetections,
-    setSessionDetections,
-    scrollCommand,
-    processVoiceTranscript,
-    startGlobalListening,
-    stopGlobalListening,
-    toggleGlobalListening,
-  };
+const value = {
+  socket,
+  isConnected,
+  currentScripture,
+  setCurrentScripture,
+  emitScriptureDetected,
+  emitClearProjection,
+  emitScrollProjection,
+  emitUpdateBranding,
+  displayDuration,
+  setDisplayDuration,
+  liveTranscript,
+  setLiveTranscript,
+  isMicListening,
+  broadcastMicStatus,
+  audioLevel,
+  autoProject,
+  setAutoProject,
+  pendingScripture,
+  setPendingScripture,
+  sessionDetections,
+  setSessionDetections,
+  scrollCommand,
+  processVoiceTranscript,
+  startGlobalListening,
+  stopGlobalListening,
+  toggleGlobalListening,
+};
 
-  return <SocketContext.Provider value={value}>{children}</SocketContext.Provider>;
+return <SocketContext.Provider value={value}>{children}</SocketContext.Provider>;
 };
 
 export const useSocket = () => {

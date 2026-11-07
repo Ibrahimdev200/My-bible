@@ -100,13 +100,13 @@ const ProjectionScreen = ({
   const activeBranding = overrideBranding ||
     user?.branding ||
     churchBranding || {
-      template: 'classic',
-      primaryColor: '#f99307',
-      secondaryColor: '#1a3dff',
-      backgroundColor: '#0b1137',
-      textColor: '#ffffff',
-      fontSize: 48,
-    };
+    template: 'classic',
+    primaryColor: '#f99307',
+    secondaryColor: '#1a3dff',
+    backgroundColor: '#0b1137',
+    textColor: '#ffffff',
+    fontSize: 48,
+  };
 
   // Fetch church branding on load if not available
   useEffect(() => {
@@ -116,7 +116,7 @@ const ProjectionScreen = ({
         .then((res) => {
           if (res.data) setChurchBranding(res.data.branding || res.data);
         })
-        .catch(() => {});
+        .catch(() => { });
     }
   }, [user, overrideBranding]);
 
@@ -126,12 +126,12 @@ const ProjectionScreen = ({
       document.documentElement
         .requestFullscreen()
         .then(() => setIsFullscreen(true))
-        .catch(() => {});
+        .catch(() => { });
     } else if (document.exitFullscreen) {
       document
         .exitFullscreen()
         .then(() => setIsFullscreen(false))
-        .catch(() => {});
+        .catch(() => { });
     }
   };
 
@@ -234,9 +234,8 @@ const ProjectionScreen = ({
   return (
     <div
       ref={containerRef}
-      className={`relative w-full h-full flex flex-col justify-between overflow-hidden select-none transition-colors duration-700 ${
-        previewMode ? 'aspect-video rounded-xl p-3.5' : 'h-screen p-6 md:p-10 lg:p-12'
-      } ${currentStyles.wrapper}`}
+      className={`relative w-full h-full flex flex-col justify-between overflow-hidden select-none transition-colors duration-700 ${previewMode ? 'aspect-video rounded-xl p-3.5' : 'h-screen p-6 md:p-10 lg:p-12'
+        } ${currentStyles.wrapper}`}
       style={{
         backgroundColor: activeBranding.backgroundColor || undefined,
         color: activeBranding.textColor || undefined,
@@ -247,9 +246,8 @@ const ProjectionScreen = ({
 
       {/* Top Bar: Church Logo, Church Name, Bible Version & Live Voice Mic */}
       <header
-        className={`relative z-10 flex items-center justify-between border-b border-white/10 ${
-          previewMode ? 'pb-2' : 'pb-4'
-        }`}
+        className={`relative z-10 flex items-center justify-between border-b border-white/10 ${previewMode ? 'pb-2' : 'pb-4'
+          }`}
       >
         <div className="flex items-center gap-3 md:gap-4 min-w-0">
           {churchLogo && !logoFailed ? (
@@ -257,15 +255,13 @@ const ProjectionScreen = ({
               src={churchLogo}
               alt={churchTitle}
               onError={() => setLogoFailed(true)}
-              className={`${
-                previewMode ? 'w-7 h-7 p-0.5' : 'w-12 h-12 md:w-14 md:h-14 p-1'
-              } rounded-2xl object-contain bg-white/10 border border-gold-500/40 shadow-xl flex-shrink-0`}
+              className={`${previewMode ? 'w-7 h-7 p-0.5' : 'w-12 h-12 md:w-14 md:h-14 p-1'
+                } rounded-2xl object-contain bg-white/10 border border-gold-500/40 shadow-xl flex-shrink-0`}
             />
           ) : (
             <div
-              className={`${
-                previewMode ? 'w-7 h-7 text-xs' : 'w-12 h-12 md:w-14 md:h-14 text-lg md:text-xl'
-              } rounded-2xl bg-gradient-to-br from-gold-500/25 to-gold-600/10 flex items-center justify-center font-extrabold text-gold-400 border border-gold-500/40 shadow-xl flex-shrink-0 font-display`}
+              className={`${previewMode ? 'w-7 h-7 text-xs' : 'w-12 h-12 md:w-14 md:h-14 text-lg md:text-xl'
+                } rounded-2xl bg-gradient-to-br from-gold-500/25 to-gold-600/10 flex items-center justify-center font-extrabold text-gold-400 border border-gold-500/40 shadow-xl flex-shrink-0 font-display`}
             >
               {(churchTitle || 'C').charAt(0).toUpperCase()}
             </div>
@@ -273,9 +269,8 @@ const ProjectionScreen = ({
 
           <div className="min-w-0">
             <h2
-              className={`${
-                previewMode ? 'text-xs' : 'text-lg md:text-2xl'
-              } font-bold tracking-wide truncate ${currentStyles.churchName}`}
+              className={`${previewMode ? 'text-xs' : 'text-lg md:text-2xl'
+                } font-bold tracking-wide truncate ${currentStyles.churchName}`}
             >
               {churchTitle}
             </h2>
@@ -293,11 +288,10 @@ const ProjectionScreen = ({
             <button
               type="button"
               onClick={toggleGlobalListening}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-bold transition-all cursor-pointer shadow-md ${
-                isMicListening
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-bold transition-all cursor-pointer shadow-md ${isMicListening
                   ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-300'
                   : 'bg-white/10 hover:bg-white/15 border-white/20 text-slate-200'
-              }`}
+                }`}
               title={
                 isMicListening
                   ? 'Voice Recognition Active — Speak scriptures or commands ("go to verse 4", "9", "scroll down", "close")'
@@ -323,9 +317,8 @@ const ProjectionScreen = ({
           )}
 
           <div
-            className={`rounded-xl border font-bold tracking-wider uppercase flex items-center gap-2 shadow-md ${
-              previewMode ? 'px-2 py-0.5 text-[10px]' : 'px-3.5 py-2 text-xs md:text-sm'
-            } ${currentStyles.badge}`}
+            className={`rounded-xl border font-bold tracking-wider uppercase flex items-center gap-2 shadow-md ${previewMode ? 'px-2 py-0.5 text-[10px]' : 'px-3.5 py-2 text-xs md:text-sm'
+              } ${currentStyles.badge}`}
           >
             <BookOpen className={previewMode ? 'w-3 h-3' : 'w-4 h-4'} />
             <span>
@@ -370,28 +363,25 @@ const ProjectionScreen = ({
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -15, scale: 0.98 }}
               transition={{ duration: 0.3, ease: 'easeOut' }}
-              className={`w-full max-w-6xl max-h-full mx-auto rounded-3xl border backdrop-blur-sm shadow-2xl flex flex-col items-center overflow-hidden ${
-                previewMode ? 'p-3' : 'p-6 md:p-10 lg:p-12'
-              } ${currentStyles.frame}`}
+              className={`w-full max-w-6xl max-h-full mx-auto rounded-3xl border backdrop-blur-sm shadow-2xl flex flex-col items-center overflow-hidden ${previewMode ? 'p-3' : 'p-6 md:p-10 lg:p-12'
+                } ${currentStyles.frame}`}
             >
               {/* Reference Header & Version Pill */}
               <div className="flex flex-wrap items-center justify-center gap-3 flex-shrink-0">
                 <h1
-                  className={`font-display tracking-tight ${
-                    previewMode
+                  className={`font-display tracking-tight ${previewMode
                       ? 'text-base font-extrabold'
                       : 'text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-extrabold'
-                  } ${currentStyles.reference}`}
+                    } ${currentStyles.reference}`}
                   style={{ color: activeBranding.primaryColor || undefined }}
                 >
                   {scripture.reference}
                 </h1>
                 <span
-                  className={`rounded-lg border font-bold uppercase tracking-widest ${
-                    previewMode
+                  className={`rounded-lg border font-bold uppercase tracking-widest ${previewMode
                       ? 'px-1.5 py-0.5 text-[9px]'
                       : 'px-3 py-1 text-xs md:text-sm'
-                  } ${currentStyles.badge}`}
+                    } ${currentStyles.badge}`}
                 >
                   {activeTranslationCode}
                 </span>
@@ -399,24 +389,21 @@ const ProjectionScreen = ({
 
               {/* Ornamental Gold Divider */}
               <div
-                className={`w-2/3 max-w-md h-[2px] flex-shrink-0 bg-gradient-to-r ${
-                  currentStyles.divider
-                } ${previewMode ? 'my-1.5' : 'my-3 md:my-5'}`}
+                className={`w-2/3 max-w-md h-[2px] flex-shrink-0 bg-gradient-to-r ${currentStyles.divider
+                  } ${previewMode ? 'my-1.5' : 'my-3 md:my-5'}`}
               />
 
               {/* Scrollable Semi-Bold Scripture Verse Body Container */}
               <div
                 ref={verseScrollRef}
-                className={`w-full flex-1 min-h-0 overflow-y-auto projector-scroll px-2 md:px-6 ${
-                  previewMode ? 'max-h-24' : 'max-h-[54vh]'
-                }`}
+                className={`w-full flex-1 min-h-0 overflow-y-auto projector-scroll px-2 md:px-6 ${previewMode ? 'max-h-24' : 'max-h-[54vh]'
+                  }`}
               >
                 <div
-                  className={`max-w-5xl mx-auto font-semibold tracking-wide drop-shadow-sm select-text ${
-                    previewMode
+                  className={`max-w-5xl mx-auto font-semibold tracking-wide drop-shadow-sm select-text ${previewMode
                       ? 'text-xs line-clamp-3 leading-snug'
                       : `${getDynamicFontSize(scripture.text)} leading-[1.45] py-2`
-                  } ${currentStyles.verseText}`}
+                    } ${currentStyles.verseText}`}
                 >
                   “{scripture.text}”
                 </div>
@@ -494,9 +481,8 @@ const ProjectionScreen = ({
             >
               <div className="relative mb-5">
                 <div
-                  className={`${
-                    previewMode ? 'w-14 h-14 rounded-2xl' : 'w-28 h-28 md:w-36 md:h-36 rounded-3xl'
-                  } bg-gradient-to-tr from-gold-500/20 via-navy-800/80 to-gold-500/10 border-2 border-gold-500/40 flex items-center justify-center shadow-2xl p-3`}
+                  className={`${previewMode ? 'w-14 h-14 rounded-2xl' : 'w-28 h-28 md:w-36 md:h-36 rounded-3xl'
+                    } bg-gradient-to-tr from-gold-500/20 via-navy-800/80 to-gold-500/10 border-2 border-gold-500/40 flex items-center justify-center shadow-2xl p-3`}
                 >
                   {churchLogo && !logoFailed ? (
                     <img
@@ -517,16 +503,14 @@ const ProjectionScreen = ({
                 </div>
               </div>
               <h2
-                className={`${
-                  previewMode ? 'text-sm' : 'text-2xl md:text-4xl'
-                } font-extrabold font-display text-white tracking-tight mb-2`}
+                className={`${previewMode ? 'text-sm' : 'text-2xl md:text-4xl'
+                  } font-extrabold font-display text-white tracking-tight mb-2`}
               >
                 {churchTitle}
               </h2>
               <p
-                className={`${
-                  previewMode ? 'text-[10px]' : 'text-sm md:text-base'
-                } text-gold-400/90 font-semibold tracking-widest uppercase`}
+                className={`${previewMode ? 'text-[10px]' : 'text-sm md:text-base'
+                  } text-gold-400/90 font-semibold tracking-widest uppercase`}
               >
                 {translationFullName} ({activeTranslationCode})
               </p>
@@ -544,9 +528,8 @@ const ProjectionScreen = ({
 
       {/* Bottom Bar: Church Identity, Live Heard Transcript Pill & Active Bible Translation */}
       <footer
-        className={`relative z-10 flex items-center justify-between gap-4 border-t border-white/10 font-semibold ${
-          previewMode ? 'pt-1.5 text-[9px]' : 'pt-3 text-xs md:text-sm'
-        } opacity-85`}
+        className={`relative z-10 flex items-center justify-between gap-4 border-t border-white/10 font-semibold ${previewMode ? 'pt-1.5 text-[9px]' : 'pt-3 text-xs md:text-sm'
+          } opacity-85`}
       >
         <div className="flex items-center gap-2 truncate">
           {churchLogo && !logoFailed && !previewMode && (
