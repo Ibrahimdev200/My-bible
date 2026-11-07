@@ -49,4 +49,31 @@ async function authMiddleware(req, res, next) {
   }
 }
 
+/**
+ * Optional authentication middleware for public/semi-public endpoints (like Bible lookup & live projector).
+ * If a valid Bearer token is provided, attaches req.church and req.churchId; otherwise continues cleanly.
+ */
+async function optionalAuthMiddleware(req, res, next) {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return next();
+
+    const parts = authHeader.split(' ');
+    if (parts.length !== 2 || parts[0] !== 'Bearer') return next();
+
+    const decoded = jwt.verify(parts[1], JWT_SECRET);
+    if (decoded && decoded.id) {
+      const church = await Church.findByPk(decoded.id);
+      if (church) {
+        req.church = church;
+        req.churchId = church.id;
+      }
+    }
+  } catch (e) {
+    // Ignore invalid/expired token on public Bible lookup routes
+  }
+  next();
+}
+
+authMiddleware.optional = optionalAuthMiddleware;
 module.exports = authMiddleware;

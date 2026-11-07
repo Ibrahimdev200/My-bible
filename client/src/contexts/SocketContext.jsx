@@ -3,6 +3,7 @@ import { io } from 'socket.io-client';
 import { useAuth } from './AuthContext';
 import { API_BASE, assetUrl } from '../utils/config';
 import { detectScripture, detectVoiceCommand, parseReferenceContext } from '../utils/scriptureDetector';
+import { fetchFallbackVerseText } from '../utils/bibleData';
 import api from '../utils/api';
 import toast from 'react-hot-toast';
 
@@ -37,6 +38,18 @@ export const SocketProvider = ({ children }) => {
   const channelRef = useRef(null);
   const timerRef = useRef(null);
   const currentScriptureRef = useRef(currentScripture);
+  // Persists the last projected chapter context even after "Close" so relative commands ("go to verse 4", "9") always work
+  const lastScriptureContextRef = useRef(
+    currentScripture || {
+      reference: 'Psalms 1:1',
+      book: 'Psalms',
+      bookName: 'Psalms',
+      chapter: 1,
+      verse: 1,
+      startVerse: 1,
+      endVerse: 1,
+    }
+  );
   const userRef = useRef(user);
   const autoProjectRef = useRef(autoProject);
   const displayDurationRef = useRef(displayDuration);
@@ -57,6 +70,9 @@ export const SocketProvider = ({ children }) => {
 
   useEffect(() => {
     currentScriptureRef.current = currentScripture;
+    if (currentScripture) {
+      lastScriptureContextRef.current = currentScripture;
+    }
   }, [currentScripture]);
 
   useEffect(() => {
@@ -440,8 +456,10 @@ export const SocketProvider = ({ children }) => {
       // 1. Check for Voice Control Commands first on the latest utterance (`text`):
       //    - "close" / "clear" / "vanish"
       //    - "scroll down" / "scroll up"
-      //    - "go to verse 4" / "navigate to verse 9" / "next verse" / or bare number "9" when on a scripture
-      const voiceCmd = detectVoiceCommand(text, currentScriptureRef.current);
+      //    - "go to verse 4" / "navigate to verse 9" / "next verse" / or bare number "9"
+      const activeOrLastContext =
+        currentScriptureRef.current || lastScriptureContextRef.current;
+      const voiceCmd = detectVoiceCommand(text, activeOrLastContext);
 
       if (voiceCmd) {
         const now = Date.now();
@@ -482,43 +500,51 @@ export const SocketProvider = ({ children }) => {
         }
 
         if (voiceCmd.type === 'NAVIGATE') {
+          let verseText = '';
+          let resolvedRef = voiceCmd.reference;
           try {
             const res = await api.get(
               `/bible/reference?ref=${encodeURIComponent(voiceCmd.reference)}&translation=${currentTranslation}`
             );
-            const verseText = res.data?.text || res.data?.verses || '';
-            if (verseText) {
-              const resolvedRef = res.data?.reference || voiceCmd.reference;
-              lastDetectedRef.current = resolvedRef;
-              lastDetectedTime.current = now;
-
-              const newEntry = {
-                id: `${resolvedRef}_${Date.now()}`,
-                reference: resolvedRef,
-                text: verseText,
-                book: voiceCmd.bookName,
-                chapter: voiceCmd.chapter,
-                verse:
-                  voiceCmd.endVerse > voiceCmd.startVerse
-                    ? `${voiceCmd.startVerse}-${voiceCmd.endVerse}`
-                    : voiceCmd.startVerse,
-                translation: currentTranslation,
-                confidence: 0.98,
-                matchedText: text,
-                timestamp: new Date().toISOString(),
-              };
-
-              setSessionDetections((prev) => [newEntry, ...prev]);
-              saveHistory(newEntry, text);
-              emitScriptureDetected(newEntry);
-              toast.success(`Navigated to ${resolvedRef}`, { duration: 2500 });
-            } else if (bypassCooldown) {
-              toast.error(`Verse ${voiceCmd.reference} not found in this chapter.`);
+            verseText = res.data?.text || res.data?.verses || '';
+            if (res.data?.reference) {
+              resolvedRef = res.data.reference;
             }
           } catch (e) {
-            if (bypassCooldown) {
-              toast.error(`Verse ${voiceCmd.reference} does not exist in this chapter.`);
-            }
+            verseText = '';
+          }
+
+          if (!verseText) {
+            verseText = await fetchFallbackVerseText(voiceCmd.reference, currentTranslation);
+          }
+
+          if (verseText) {
+            lastDetectedRef.current = resolvedRef;
+            lastDetectedTime.current = now;
+
+            const newEntry = {
+              id: `${resolvedRef}_${Date.now()}`,
+              reference: resolvedRef,
+              text: verseText,
+              book: voiceCmd.bookName,
+              chapter: voiceCmd.chapter,
+              verse:
+                voiceCmd.endVerse > voiceCmd.startVerse
+                  ? `${voiceCmd.startVerse}-${voiceCmd.endVerse}`
+                  : voiceCmd.startVerse,
+              translation: currentTranslation,
+              confidence: 0.98,
+              matchedText: text,
+              timestamp: new Date().toISOString(),
+            };
+
+            lastScriptureContextRef.current = newEntry;
+            setSessionDetections((prev) => [newEntry, ...prev]);
+            saveHistory(newEntry, text);
+            emitScriptureDetected(newEntry);
+            toast.success(`Navigated to ${resolvedRef}`, { duration: 2500 });
+          } else if (bypassCooldown) {
+            toast.error(`Verse ${voiceCmd.reference} not found in this chapter.`);
           }
           return;
         }
@@ -560,7 +586,16 @@ export const SocketProvider = ({ children }) => {
           verseText = '';
         }
 
-        if (!verseText) return;
+        if (!verseText) {
+          verseText = await fetchFallbackVerseText(detected.reference, currentTranslation);
+        }
+
+        if (!verseText) {
+          if (bypassCooldown) {
+            toast.error(`Could not load verse text for ${detected.reference}.`);
+          }
+          return;
+        }
 
         const newEntry = {
           id: `${detected.reference}_${Date.now()}`,
@@ -578,6 +613,7 @@ export const SocketProvider = ({ children }) => {
           timestamp: new Date().toISOString(),
         };
 
+        lastScriptureContextRef.current = newEntry;
         setSessionDetections((prev) => [newEntry, ...prev]);
         saveHistory(newEntry, text);
 
@@ -709,10 +745,6 @@ export const SocketProvider = ({ children }) => {
         return false;
       }
 
-      if (shouldListenRef.current && recognitionRef.current) {
-        return true;
-      }
-
       try {
         // First notify any other open tab to release its SpeechRecognition lock BEFORE starting ours
         shouldListenRef.current = true;
@@ -793,31 +825,25 @@ export const SocketProvider = ({ children }) => {
             if (shouldListenRef.current) {
               setTimeout(() => {
                 if (!shouldListenRef.current) return;
-                try {
-                  recognition.start();
-                } catch {
-                  try {
-                    createAndStartRecognition();
-                  } catch { }
-                }
-            }, 120);
-}
+                createAndStartRecognition();
+              }, 150);
+            }
           };
 
-recognitionRef.current = recognition;
-try {
-  recognition.start();
-} catch { }
+          recognitionRef.current = recognition;
+          try {
+            recognition.start();
+          } catch { }
         };
 
-// Call synchronously inside user click gesture so Chrome/Edge never blocks SpeechRecognition.start()
-createAndStartRecognition();
-setupAudioAnalyser();
+        // Call synchronously inside user click gesture so Chrome/Edge never blocks SpeechRecognition.start()
+        createAndStartRecognition();
+        setupAudioAnalyser();
 
-if (!silentToast) {
-  toast.success('Voice capture active — listening for scriptures & commands');
-}
-return true;
+        if (!silentToast) {
+          toast.success('Voice capture active — listening for scriptures & commands');
+        }
+        return true;
       } catch (err) {
   console.error('Failed to start voice capture:', err);
   shouldListenRef.current = false;

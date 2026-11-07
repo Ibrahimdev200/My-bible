@@ -28,7 +28,7 @@ function checkBibleDb(req, res, next) {
  */
 router.get(
   '/books',
-  authMiddleware,
+  authMiddleware.optional,
   [
     query('testament')
       .optional()
@@ -61,7 +61,7 @@ router.get(
  * GET /api/bible/translations
  * Get available translations
  */
-router.get('/translations', authMiddleware, (req, res) => {
+router.get('/translations', authMiddleware.optional, (req, res) => {
   try {
     const translations = bibleService.getTranslations();
     return res.status(200).json({
@@ -80,7 +80,7 @@ router.get('/translations', authMiddleware, (req, res) => {
  */
 router.get(
   '/books/:bookId/chapters',
-  authMiddleware,
+  authMiddleware.optional,
   [param('bookId').notEmpty().withMessage('bookId is required')],
   (req, res) => {
     try {
@@ -121,7 +121,7 @@ router.get(
  */
 router.get(
   '/books/:bookId/chapters/:chapter',
-  authMiddleware,
+  authMiddleware.optional,
   checkBibleDb,
   [
     param('bookId').notEmpty().withMessage('bookId is required'),
@@ -169,7 +169,7 @@ router.get(
  */
 router.get(
   '/verse/:bookId/:chapter/:verse',
-  authMiddleware,
+  authMiddleware.optional,
   checkBibleDb,
   [
     param('bookId').notEmpty().withMessage('bookId is required'),
@@ -215,7 +215,7 @@ router.get(
  */
 router.get(
   '/search',
-  authMiddleware,
+  authMiddleware.optional,
   checkBibleDb,
   [
     query('q').trim().notEmpty().withMessage('Search query "q" is required'),
@@ -255,7 +255,7 @@ router.get(
  */
 router.get(
   '/reference',
-  authMiddleware,
+  authMiddleware.optional,
   checkBibleDb,
   [
     query('ref').trim().notEmpty().withMessage('Reference parameter "ref" is required'),
@@ -287,7 +287,7 @@ router.get(
  */
 router.post(
   '/detect',
-  authMiddleware,
+  authMiddleware.optional,
   [body('text').trim().notEmpty().withMessage('Speech text is required')],
   async (req, res) => {
     try {
@@ -300,7 +300,7 @@ router.post(
       const translation = req.body.translation || (req.church ? req.church.selectedTranslation : 'KJV');
 
       const detected = scriptureDetector.detectScripture(text, {
-        churchId: req.church.id,
+        churchId: req.church ? req.church.id : 'public',
         translation,
         ignoreDebounce: Boolean(ignoreDebounce)
       });

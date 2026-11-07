@@ -401,7 +401,7 @@ const ProjectionScreen = ({
               >
                 <div
                   className={`max-w-5xl mx-auto font-semibold tracking-wide drop-shadow-sm select-text ${previewMode
-                      ? 'text-xs line-clamp-3 leading-snug'
+                      ? 'text-xs leading-relaxed py-1'
                       : `${getDynamicFontSize(scripture.text)} leading-[1.45] py-2`
                     } ${currentStyles.verseText}`}
                 >

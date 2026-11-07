@@ -20,14 +20,23 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response interceptor to catch unauthorized errors
+// Response interceptor to catch unauthorized errors on protected account routes only
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response && error.response.status === 401) {
-      // Don't auto-redirect if we're on login or register or checking /me
-      const isAuthCheck = error.config.url.includes('/auth/me');
-      if (!isAuthCheck && !window.location.pathname.includes('/login') && !window.location.pathname.includes('/register')) {
+      const url = error.config?.url || '';
+      const isPublicOrSilentRoute =
+        url.includes('/auth/me') ||
+        url.includes('/bible/') ||
+        url.includes('/scripture/history');
+
+      if (
+        !isPublicOrSilentRoute &&
+        !window.location.pathname.includes('/login') &&
+        !window.location.pathname.includes('/register') &&
+        !window.location.pathname.includes('/projection')
+      ) {
         localStorage.removeItem('token');
         window.location.href = '/login';
       }

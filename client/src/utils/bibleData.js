@@ -90,3 +90,87 @@ export function findBibleBook(query) {
   );
 }
 
+// Instant offline fallback verses for common passages & Operator Command Bar demos
+export const FALLBACK_VERSES = {
+  'Psalms 1:1':
+    'Blessed is the man that walketh not in the counsel of the ungodly, nor standeth in the way of sinners, nor sitteth in the seat of the scornful.',
+  'Psalms 1:2':
+    'But his delight is in the law of the LORD; and in his law doth he meditate day and night.',
+  'Psalms 1:3':
+    'And he shall be like a tree planted by the rivers of water, that bringeth forth his fruit in his season; his leaf also shall not wither; and whatsoever he doeth shall prosper.',
+  'Psalms 1:4':
+    'The ungodly are not so: but are like the chaff which the wind driveth away.',
+  'Psalms 1:5':
+    'Therefore the ungodly shall not stand in the judgment, nor sinners in the congregation of the righteous.',
+  'Psalms 1:6':
+    'For the LORD knoweth the way of the righteous: but the way of the ungodly shall perish.',
+  'Psalms 23:1': 'The LORD is my shepherd; I shall not want.',
+  'Psalms 23:2':
+    'He maketh me to lie down in green pastures: he leadeth me beside the still waters.',
+  'Psalms 23:3':
+    'He restoreth my soul: he leadeth me in the paths of righteousness for his name’s sake.',
+  'Psalms 23:4':
+    'Yea, though I walk through the valley of the shadow of death, I will fear no evil: for thou art with me; thy rod and thy staff they comfort me.',
+  'Psalms 23:5':
+    'Thou preparest a table before me in the presence of mine enemies: thou anointest my head with oil; my cup runneth over.',
+  'Psalms 23:6':
+    'Surely goodness and mercy shall follow me all the days of my life: and I will dwell in the house of the LORD for ever.',
+  'Psalms 119:9':
+    'Wherewithal shall a young man cleanse his way? by taking heed thereto according to thy word.',
+  'John 3:16':
+    'For God so loved the world, that he gave his only begotten Son, that whosoever believeth in him should not perish, but have everlasting life.',
+  'John 3:17':
+    'For God sent not his Son into the world to condemn the world; but that the world through him might be saved.',
+  'John 1:1':
+    'In the beginning was the Word, and the Word was with God, and the Word was God.',
+  'Genesis 1:1': 'In the beginning God created the heaven and the earth.',
+  'Genesis 1:2':
+    'And the earth was without form, and void; and darkness was upon the face of the deep. And the Spirit of God moved upon the face of the waters.',
+  'Genesis 1:3': 'And God said, Let there be light: and there was light.',
+  'Genesis 1:4':
+    'And God saw the light, that it was good: and God divided the light from the darkness.',
+  'Genesis 1:9':
+    'And God said, Let the waters under the heaven be gathered together unto one place, and let the dry land appear: and it was so.',
+  'Romans 8:28':
+    'And we know that all things work together for good to them that love God, to them who are the called according to his purpose.',
+  'Philippians 4:13': 'I can do all things through Christ which strengtheneth me.',
+  'Jeremiah 29:11':
+    'For I know the thoughts that I think toward you, saith the LORD, thoughts of peace, and not of evil, to give you an expected end.',
+  'Proverbs 3:5':
+    'Trust in the LORD with all thine heart; and lean not unto thine own understanding.',
+  'Proverbs 3:6':
+    'In all thy ways acknowledge him, and he shall direct thy paths.',
+  'Isaiah 40:31':
+    'But they that wait upon the LORD shall renew their strength; they shall mount up with wings as eagles; they shall run, and not be weary; and they shall walk, and not faint.',
+  'Matthew 28:19':
+    'Go ye therefore, and teach all nations, baptizing them in the name of the Father, and of the Son, and of the Holy Ghost:',
+  'Matthew 28:20':
+    'Teaching them to observe all things whatsoever I have commanded you: and, lo, I am with you alway, even unto the end of the world. Amen.',
+};
+
+// Public fallback fetcher if our own backend is cold-starting or unreachable
+export async function fetchFallbackVerseText(reference, translation = 'KJV') {
+  if (!reference) return '';
+  if (FALLBACK_VERSES[reference]) {
+    return FALLBACK_VERSES[reference];
+  }
+  try {
+    const t = ['KJV', 'WEB', 'ASV', 'YLT'].includes(String(translation).toUpperCase())
+      ? String(translation).toLowerCase()
+      : 'kjv';
+    const resp = await fetch(
+      `https://bible-api.com/${encodeURIComponent(reference)}?translation=${t}`
+    );
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data && data.text) {
+        return String(data.text).replace(/\s+/g, ' ').trim();
+      }
+    }
+  } catch {
+    // ignore network error
+  }
+  return '';
+}
+
+

@@ -292,6 +292,7 @@ export function detectVoiceCommand(transcript, activeScripture = null) {
   const tokens = convertNumberWords(s.split(/\s+/).filter(Boolean));
   if (tokens.length === 0) return null;
   const joined = tokens.join(' ');
+  const tail = tokens.slice(-8).join(' ');
 
   // 1. Check if the utterance contains a full Bible Book reference first; if so, let detectScripture handle it
   if (detectScripture(transcript)) {
@@ -301,7 +302,7 @@ export function detectVoiceCommand(transcript, activeScripture = null) {
   // 2. Close / Clear / Vanish commands
   if (
     /\b(close|clear|vanish|hide|dismiss|stop projecting|remove scripture|close screen|clear screen|close projector|off screen)\b/.test(
-      joined
+      tail
     )
   ) {
     return { type: 'CLEAR' };
@@ -309,26 +310,37 @@ export function detectVoiceCommand(transcript, activeScripture = null) {
 
   // 3. Scroll Up / Scroll Down commands
   if (
-    /\b(scroll down|page down|move down|go down|slide down|down a bit|scroll to bottom)\b/.test(
-      joined
+    /\b(scroll down|scrolling down|page down|move down|go down|slide down|down a bit|scroll to bottom)\b/.test(
+      tail
     )
   ) {
     return { type: 'SCROLL', direction: 'down' };
   }
   if (
-    /\b(scroll up|page up|move up|go up|slide up|up a bit|scroll to top|back to top)\b/.test(
-      joined
+    /\b(scroll up|scrolling up|page up|move up|go up|slide up|up a bit|scroll to top|back to top)\b/.test(
+      tail
     )
   ) {
     return { type: 'SCROLL', direction: 'up' };
   }
 
-  // 4. Contextual navigation commands (requires an active scripture on screen)
+  // 4. Contextual navigation commands (if no active scripture yet, check if user tried a relative verse command)
   const ctx = parseReferenceContext(activeScripture);
-  if (!ctx) return null;
+  if (!ctx) {
+    if (
+      /\b(?:go to|navigate to|jump to|next|previous|prev)\s+(?:verse|chapter)\b/.test(tail) ||
+      /^(?:verse|vs)\s+\d{1,3}$/.test(tail)
+    ) {
+      return { type: 'NO_ACTIVE_SCRIPTURE' };
+    }
+    return null;
+  }
 
   // 4a. Next / Previous verse
-  if (/\b(next verse|next one|continue to next|go to next|read next|forward)\b/.test(joined) || joined === 'next') {
+  if (
+    /\b(next verse|next one|continue to next|go to next|read next|forward)\b/.test(tail) ||
+    tail === 'next'
+  ) {
     const nextV = (ctx.endVerse || ctx.startVerse || 1) + 1;
     return {
       type: 'NAVIGATE',
@@ -340,7 +352,7 @@ export function detectVoiceCommand(transcript, activeScripture = null) {
     };
   }
 
-  if (/\b(previous verse|prev verse|last verse|go back|previous|back one verse)\b/.test(joined)) {
+  if (/\b(previous verse|prev verse|last verse|go back|previous|back one verse)\b/.test(tail)) {
     const prevV = Math.max(1, (ctx.startVerse || 1) - 1);
     return {
       type: 'NAVIGATE',
@@ -353,9 +365,10 @@ export function detectVoiceCommand(transcript, activeScripture = null) {
   }
 
   // 4b. Chapter + optional verse navigation within current book ("go to chapter 2 verse 4" or "chapter 3")
-  const chapMatch = /\b(?:go to|navigate to|open|jump to|switch to)?\s*chapter\s+(\d{1,3})(?:\s+verse\s+(\d{1,3})(?:\s+(?:to|through|and)\s+(?:verse\s+)?(\d{1,3}))?)?\b/.exec(
-    joined
-  );
+  const chapMatch =
+    /\b(?:go to|navigate to|open|jump to|switch to)?\s*chapter\s+(\d{1,3})(?:\s+verse\s+(\d{1,3})(?:\s+(?:to|through|and)\s+(?:verse\s+)?(\d{1,3}))?)?\b/.exec(
+      tail
+    );
   if (chapMatch) {
     const ch = parseInt(chapMatch[1], 10);
     const vStart = chapMatch[2] ? parseInt(chapMatch[2], 10) : 1;
@@ -378,10 +391,10 @@ export function detectVoiceCommand(transcript, activeScripture = null) {
   // e.g. "go to verse 4", "navigate to verse 9", "verse 4", "verse 4 to 7", "go to 4", "navigate to 9", "jump to 5"
   const verseNavMatch =
     /\b(?:go to|navigate to|jump to|move to|read|show|project|from)?\s*(?:verse|verses|vs|v)\s+(\d{1,3})(?:\s+(?:to|through|thru|and)\s+(?:verse\s+)?(\d{1,3}))?\b/.exec(
-      joined
+      tail
     ) ||
     /\b(?:go to|navigate to|jump to|move to|verse)\s+(\d{1,3})(?:\s+(?:to|through|thru|and)\s+(\d{1,3}))?\b/.exec(
-      joined
+      tail
     );
 
   if (verseNavMatch) {

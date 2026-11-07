@@ -51,10 +51,12 @@ const LiveDetection = () => {
   // Trigger manual speech or quick reference test
   const handleManualSubmit = async (e) => {
     e.preventDefault();
-    if (!manualInput.trim()) return;
+    const cmd = manualInput.trim();
+    if (!cmd) return;
+    setLiveTranscript(cmd);
     setIsAnalyzingManual(true);
     try {
-      await processVoiceTranscript(manualInput.trim(), true, true);
+      await processVoiceTranscript(cmd, true, true);
       setManualInput('');
     } finally {
       setIsAnalyzingManual(false);
@@ -63,6 +65,7 @@ const LiveDetection = () => {
 
   const handleSampleClick = async (phrase) => {
     setManualInput(phrase);
+    setLiveTranscript(phrase);
     setIsAnalyzingManual(true);
     try {
       await processVoiceTranscript(phrase, true, true);
