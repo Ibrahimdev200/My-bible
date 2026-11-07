@@ -1,4 +1,7 @@
 const express = require('express');
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
 const { body, validationResult } = require('express-validator');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
@@ -8,6 +11,37 @@ const authMiddleware = require('../middleware/auth');
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this-in-production';
 const JWT_EXPIRES_IN = '7d';
+
+// Ensure upload directory exists for logos
+const uploadDir = path.resolve(__dirname, '../../uploads/logos');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadDir),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const timestamp = Date.now();
+    cb(null, `church-${timestamp}${ext}`);
+  }
+});
+
+const fileFilter = (req, file, cb) => {
+  const allowed = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+  const ext = path.extname(file.originalname).toLowerCase();
+  if (allowed.includes(ext)) {
+    cb(null, true);
+  } else {
+    cb(null, false); // Ignore invalid logo file instead of crashing registration
+  }
+};
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter
+});
 
 /**
  * Helper to generate JWT token for a church
@@ -26,14 +60,27 @@ function generateToken(church) {
 
 /**
  * POST /api/auth/register
- * Register a new church
+ * Register a new church (supports JSON and multipart/form-data with logo)
  */
 router.post(
   '/register',
+  (req, res, next) => {
+    // Gracefully handle multipart or json
+    upload.single('logo')(req, res, (err) => {
+      if (err) {
+        console.warn('Multer error during registration:', err.message);
+      }
+      // If churchName was sent instead of name, copy it over
+      if (req.body && !req.body.name && req.body.churchName) {
+        req.body.name = req.body.churchName;
+      }
+      next();
+    });
+  },
   [
     body('name').trim().notEmpty().withMessage('Church name is required'),
     body('email').trim().isEmail().withMessage('A valid email address is required').normalizeEmail(),
-    body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters long'),
+    body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters long'),
     body('pastorName').optional({ checkFalsy: true }).trim(),
     body('phone').optional({ checkFalsy: true }).trim(),
     body('country').optional({ checkFalsy: true }).trim(),
@@ -47,7 +94,8 @@ router.post(
         return res.status(400).json({ errors: errors.array() });
       }
 
-      const { name, email, pastorName, phone, country, state, address, password } = req.body;
+      const name = req.body.name || req.body.churchName;
+      const { email, pastorName, phone, country, state, address, password } = req.body;
 
       // Check if church already exists
       const existing = await Church.findOne({ where: { email: email.toLowerCase() } });
@@ -58,6 +106,8 @@ router.post(
       // Hash password with bcryptjs salt rounds 12
       const passwordHash = await bcrypt.hash(password, 12);
 
+      const logoPath = req.file ? `/uploads/logos/${req.file.filename}` : null;
+
       const church = await Church.create({
         name,
         email: email.toLowerCase(),
@@ -67,6 +117,7 @@ router.post(
         state: state || null,
         address: address || null,
         passwordHash,
+        logoPath,
         selectedTranslation: 'KJV',
         brandingConfig: {
           primaryColor: '#1e40af',

@@ -80,10 +80,10 @@ export const AuthProvider = ({ children }) => {
   const register = async (registrationData) => {
     try {
       // If registrationData is FormData or Object
-      const isFormData = registrationData instanceof FormData;
-      const headers = isFormData ? { 'Content-Type': 'multipart/form-data' } : {};
+    const isFormData = registrationData instanceof FormData;
+    const config = isFormData ? { headers: { 'Content-Type': undefined } } : {};
 
-      const res = await api.post('/auth/register', registrationData, { headers });
+    const res = await api.post('/auth/register', registrationData, config);
       const authToken = res.data.token;
       const authUser = normalizeUser(res.data);
 
@@ -127,7 +127,7 @@ export const AuthProvider = ({ children }) => {
       const formData = new FormData();
       formData.append('logo', file);
       const res = await api.post('/church/logo', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+        headers: { 'Content-Type': undefined },
       });
       const logoUrl = assetUrl(res.data.logoUrl || res.data.url);
       setUser(prev => ({ ...prev, logoUrl }));
