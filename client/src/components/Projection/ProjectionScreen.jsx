@@ -45,12 +45,6 @@ const ProjectionScreen = ({
   // Active scripture from prop override (when provided) or socket context
   const scripture = overrideScripture || socketScripture;
 
-  // Automatically start live voice capture when the full Projector Screen opens
-  useEffect(() => {
-    if (previewMode) return;
-    startGlobalListening(true);
-  }, [previewMode, startGlobalListening]);
-
   // React to remote or voice scroll commands ("scroll down" / "scroll up")
   useEffect(() => {
     if (!scrollCommand || !verseScrollRef.current) return;

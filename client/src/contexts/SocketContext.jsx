@@ -30,6 +30,9 @@ export const SocketProvider = ({ children }) => {
   const [sessionDetections, setSessionDetections] = useState([]);
   const [scrollCommand, setScrollCommand] = useState(null);
 
+  // Unique ID for this browser tab so only ONE tab holds the hardware SpeechRecognition lock at a time
+  const tabIdRef = useRef(`tab_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+
   // Refs for global continuous voice capture
   const channelRef = useRef(null);
   const timerRef = useRef(null);
@@ -73,15 +76,68 @@ export const SocketProvider = ({ children }) => {
     try {
       channelRef.current = new BroadcastChannel('scripturelive_channel');
       channelRef.current.onmessage = (event) => {
-        const { type, payload } = event.data;
+        const { type, payload, senderTabId } = event.data;
         if (type === 'SCRIPTURE_DETECTED') {
           setCurrentScripture(payload);
+          currentScriptureRef.current = payload;
         } else if (type === 'CLEAR_PROJECTION') {
           setCurrentScripture(null);
+          currentScriptureRef.current = null;
         } else if (type === 'MIC_STATUS') {
-          setIsMicListening(payload);
+          // Another tab took over or stopped the microphone
+          if (payload && senderTabId && senderTabId !== tabIdRef.current) {
+            // Release hardware mic in this tab so the active tab has exclusive SpeechRecognition access
+            if (shouldListenRef.current) {
+              shouldListenRef.current = false;
+              if (recognitionRef.current) {
+                try {
+                  recognitionRef.current.onend = null;
+                  recognitionRef.current.stop();
+                } catch {}
+                recognitionRef.current = null;
+              }
+              if (animationFrameRef.current) {
+                cancelAnimationFrame(animationFrameRef.current);
+              }
+              if (mediaStreamRef.current) {
+                mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+                mediaStreamRef.current = null;
+              }
+              if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+                audioContextRef.current.close().catch(() => {});
+                audioContextRef.current = null;
+              }
+            }
+          }
+          setIsMicListening(Boolean(payload));
+        } else if (type === 'LIVE_TRANSCRIPT') {
+          setLiveTranscript(payload || '');
         } else if (type === 'SCROLL_PROJECTION') {
           setScrollCommand({ ...payload, ts: Date.now() });
+        } else if (type === 'REMOTE_TOGGLE_MIC') {
+          // If another tab requested stopping the mic and this tab owns it, stop cleanly
+          if (payload === false && shouldListenRef.current) {
+            shouldListenRef.current = false;
+            setIsMicListening(false);
+            if (recognitionRef.current) {
+              try {
+                recognitionRef.current.onend = null;
+                recognitionRef.current.stop();
+              } catch {}
+              recognitionRef.current = null;
+            }
+            if (animationFrameRef.current) {
+              cancelAnimationFrame(animationFrameRef.current);
+            }
+            if (mediaStreamRef.current) {
+              mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+              mediaStreamRef.current = null;
+            }
+            if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+              audioContextRef.current.close().catch(() => {});
+              audioContextRef.current = null;
+            }
+          }
         }
       };
     } catch (e) {
@@ -278,7 +334,11 @@ export const SocketProvider = ({ children }) => {
   const broadcastMicStatus = useCallback((active) => {
     setIsMicListening(active);
     if (channelRef.current) {
-      channelRef.current.postMessage({ type: 'MIC_STATUS', payload: active });
+      channelRef.current.postMessage({
+        type: 'MIC_STATUS',
+        payload: active,
+        senderTabId: tabIdRef.current,
+      });
     }
   }, []);
 
@@ -367,6 +427,13 @@ export const SocketProvider = ({ children }) => {
     async (text, isFinal, bypassCooldown = false, rollingWindow = '') => {
       if (!text || !text.trim()) return;
       setLiveTranscript(text);
+      if (channelRef.current) {
+        channelRef.current.postMessage({
+          type: 'LIVE_TRANSCRIPT',
+          payload: text,
+          senderTabId: tabIdRef.current,
+        });
+      }
 
       const currentTranslation = (userRef.current?.preferredTranslation || 'KJV').toUpperCase();
 
@@ -595,6 +662,13 @@ export const SocketProvider = ({ children }) => {
     shouldListenRef.current = false;
     setIsMicListening(false);
     broadcastMicStatus(false);
+    if (channelRef.current) {
+      channelRef.current.postMessage({
+        type: 'REMOTE_TOGGLE_MIC',
+        payload: false,
+        senderTabId: tabIdRef.current,
+      });
+    }
 
     if (recognitionRef.current) {
       try {
@@ -640,6 +714,7 @@ export const SocketProvider = ({ children }) => {
       }
 
       try {
+        // First notify any other open tab to release its SpeechRecognition lock BEFORE starting ours
         shouldListenRef.current = true;
         setIsMicListening(true);
         broadcastMicStatus(true);
@@ -647,10 +722,20 @@ export const SocketProvider = ({ children }) => {
         const createAndStartRecognition = () => {
           if (!shouldListenRef.current) return;
 
+          // Clean up any stale instance in this tab first
+          if (recognitionRef.current) {
+            try {
+              recognitionRef.current.onend = null;
+              recognitionRef.current.onerror = null;
+              recognitionRef.current.onresult = null;
+              recognitionRef.current.stop();
+            } catch {}
+            recognitionRef.current = null;
+          }
+
           const recognition = new SpeechRecognition();
           recognition.continuous = true;
           recognition.interimResults = true;
-          recognition.maxAlternatives = 3;
           recognition.lang = 'en-US';
 
           recognition.onresult = (event) => {
@@ -698,6 +783,9 @@ export const SocketProvider = ({ children }) => {
                 toast.error('Microphone access was denied. Please allow microphone permissions.');
               }
               stopGlobalListening();
+            } else if (event.error === 'aborted') {
+              // Another tab or browser event interrupted this instance; do not tight-loop if we released ownership
+              if (!shouldListenRef.current) return;
             }
           };
 
@@ -712,7 +800,7 @@ export const SocketProvider = ({ children }) => {
                     createAndStartRecognition();
                   } catch {}
                 }
-              }, 50);
+              }, 120);
             }
           };
 
@@ -722,8 +810,10 @@ export const SocketProvider = ({ children }) => {
           } catch {}
         };
 
+        // Call synchronously inside user click gesture so Chrome/Edge never blocks SpeechRecognition.start()
         createAndStartRecognition();
         setupAudioAnalyser();
+
         if (!silentToast) {
           toast.success('Voice capture active — listening for scriptures & commands');
         }
@@ -740,13 +830,13 @@ export const SocketProvider = ({ children }) => {
   );
 
   const toggleGlobalListening = useCallback(() => {
-    if (shouldListenRef.current) {
+    if (shouldListenRef.current || isMicListening) {
       stopGlobalListening();
       toast('Microphone paused');
     } else {
       startGlobalListening(false);
     }
-  }, [startGlobalListening, stopGlobalListening]);
+  }, [isMicListening, startGlobalListening, stopGlobalListening]);
 
   const value = {
     socket,
