@@ -1,7 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useSocket } from '../../contexts/SocketContext';
-import { BIBLE_BOOKS, findBibleBook } from '../../utils/bibleData';
+import {
+  BIBLE_BOOKS,
+  findBibleBook,
+  FALLBACK_VERSES,
+  fetchFallbackVerseText,
+} from '../../utils/bibleData';
+import { detectScripture } from '../../utils/scriptureDetector';
 import api from '../../utils/api';
 import BookList from './BookList';
 import ChapterView from './ChapterView';
@@ -73,7 +79,40 @@ const BibleBrowser = () => {
         setSearchResults(list);
         setShowSearchDropdown(true);
       } catch (err) {
-        setSearchResults([]);
+        const fallbackList = [];
+        const parsedRef = detectScripture(trimmed);
+        if (parsedRef) {
+          const text = await fetchFallbackVerseText(parsedRef.reference, translation);
+          if (text) {
+            fallbackList.push({
+              reference: parsedRef.reference,
+              book_name: parsedRef.bookName,
+              chapter: parsedRef.chapter,
+              verse: parsedRef.startVerse,
+              text,
+              translation,
+            });
+          }
+        }
+
+        const qLower = trimmed.toLowerCase();
+        for (const [ref, text] of Object.entries(FALLBACK_VERSES)) {
+          if (ref.toLowerCase().includes(qLower) || text.toLowerCase().includes(qLower)) {
+            const parts = ref.match(/^(.+?)\s+(\d+):(\d+)$/);
+            if (parts && !fallbackList.some((x) => x.reference === ref)) {
+              fallbackList.push({
+                reference: ref,
+                book_name: parts[1],
+                chapter: Number(parts[2]),
+                verse: Number(parts[3]),
+                text,
+                translation,
+              });
+            }
+          }
+        }
+        setSearchResults(fallbackList);
+        setShowSearchDropdown(true);
       } finally {
         setIsSearching(false);
       }
@@ -84,16 +123,30 @@ const BibleBrowser = () => {
 
   // Helper to log projected verse to history
   const logToHistory = (entry) => {
-    api
-      .post('/scripture/history', {
-        reference: entry.reference,
-        verseText: entry.text,
-        text: entry.text,
-        translation: entry.translation || translation,
-        confidence: 1.0,
-        speechText: `Manual Projection: ${entry.reference}`,
-      })
-      .catch(() => {});
+    const record = {
+      id: `${entry.reference}_${Date.now()}`,
+      reference: entry.reference,
+      verseText: entry.text,
+      text: entry.text,
+      book: entry.book || '',
+      chapter: entry.chapter || '',
+      verse: entry.verse || '',
+      translation: entry.translation || translation,
+      confidence: 1.0,
+      speechText: `Manual Projection: ${entry.reference}`,
+      spokenText: `Manual Projection: ${entry.reference}`,
+      createdAt: new Date().toISOString(),
+      timestamp: new Date().toISOString(),
+    };
+    try {
+      const existingRaw = localStorage.getItem('scripturelive_local_history');
+      const existing = existingRaw ? JSON.parse(existingRaw) : [];
+      localStorage.setItem(
+        'scripturelive_local_history',
+        JSON.stringify([record, ...existing].slice(0, 150))
+      );
+    } catch { }
+    api.post('/scripture/history', record).catch(() => {});
   };
 
   // Directly project a search result
@@ -133,24 +186,37 @@ const BibleBrowser = () => {
   // Quick-project a popular scripture pill & open it in the reader
   const handleQuickVerse = async (pill) => {
     handleOpenInReader(pill.bookName, pill.chapter, pill.verse, pill.endVerse);
+    let verseText = '';
+    let resolvedRef = pill.label;
     try {
       const res = await api.get(
         `/bible/reference?ref=${encodeURIComponent(pill.label)}&translation=${translation}`
       );
       if (res.data && res.data.text) {
-        const payload = {
-          reference: res.data.reference || pill.label,
-          text: res.data.text,
-          book: pill.bookName,
-          chapter: pill.chapter,
-          verse: pill.endVerse ? `${pill.verse}-${pill.endVerse}` : pill.verse,
-          translation,
-        };
-        emitScriptureDetected(payload);
-        logToHistory(payload);
-        toast.success(`Projected ${payload.reference} (${translation})`);
+        verseText = res.data.text;
+        resolvedRef = res.data.reference || pill.label;
       }
-    } catch (err) {
+    } catch {
+      verseText = '';
+    }
+
+    if (!verseText) {
+      verseText = await fetchFallbackVerseText(pill.label, translation);
+    }
+
+    if (verseText) {
+      const payload = {
+        reference: resolvedRef,
+        text: verseText,
+        book: pill.bookName,
+        chapter: pill.chapter,
+        verse: pill.endVerse ? `${pill.verse}-${pill.endVerse}` : pill.verse,
+        translation,
+      };
+      emitScriptureDetected(payload);
+      logToHistory(payload);
+      toast.success(`Projected ${payload.reference} (${translation})`);
+    } else {
       toast.error(`Could not load ${pill.label}`);
     }
   };

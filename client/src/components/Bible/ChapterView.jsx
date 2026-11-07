@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSocket } from '../../contexts/SocketContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { fetchFallbackChapterVerses } from '../../utils/bibleData';
 import api from '../../utils/api';
 import {
   Radio,
@@ -95,24 +96,30 @@ const ChapterView = ({ book, translation = 'KJV', targetLocation }) => {
           }
         }
       } catch (err) {
-        try {
-          const fallbackRes = await api.get(
-            `/bible/reference?ref=${encodeURIComponent(`${book.name} ${selectedChapter}`)}&translation=${translation}`
-          );
-          if (!isCancelled && fallbackRes.data) {
-            const data = fallbackRes.data;
-            const text = data.text || data.verses || 'Scripture verse text loaded.';
-            setVerses([{ verse: 1, text }]);
+        const fallbackList = await fetchFallbackChapterVerses(
+          book.name,
+          selectedChapter,
+          translation
+        );
+        if (!isCancelled && fallbackList.length > 0) {
+          setVerses(fallbackList);
+          if (pendingScrollVerse.current) {
+            const targetV = pendingScrollVerse.current;
+            pendingScrollVerse.current = null;
+            setTimeout(() => {
+              const el = verseRefs.current[targetV];
+              if (el && el.scrollIntoView) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }
+            }, 80);
           }
-        } catch (e2) {
-          if (!isCancelled) {
-            setVerses([
-              {
-                verse: 1,
-                text: `In the beginning, scripture recorded in ${book.name} chapter ${selectedChapter}.`,
-              },
-            ]);
-          }
+        } else if (!isCancelled) {
+          setVerses([
+            {
+              verse: 1,
+              text: `Select a verse in ${book.name} ${selectedChapter} to project.`,
+            },
+          ]);
         }
       } finally {
         if (!isCancelled) setLoading(false);

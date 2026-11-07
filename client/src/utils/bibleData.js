@@ -173,4 +173,83 @@ export async function fetchFallbackVerseText(reference, translation = 'KJV') {
   return '';
 }
 
+// Fetch an entire chapter's verses from public fallback if backend is unreachable
+export async function fetchFallbackChapterVerses(bookName, chapter, translation = 'KJV') {
+  if (!bookName || !chapter) return [];
+  try {
+    const t = ['KJV', 'WEB', 'ASV', 'YLT'].includes(String(translation).toUpperCase())
+      ? String(translation).toLowerCase()
+      : 'kjv';
+    const resp = await fetch(
+      `https://bible-api.com/${encodeURIComponent(`${bookName} ${chapter}`)}?translation=${t}`
+    );
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data && Array.isArray(data.verses) && data.verses.length > 0) {
+        return data.verses.map((v, idx) => ({
+          verse: v.verse || idx + 1,
+          text: String(v.text || '').replace(/\s+/g, ' ').trim(),
+        }));
+      }
+    }
+  } catch { }
+
+  // Offline fallback from bundled FALLBACK_VERSES for this book + chapter
+  const prefix = `${bookName} ${chapter}:`;
+  const list = Object.entries(FALLBACK_VERSES)
+    .filter(([k]) => k.toLowerCase().startsWith(prefix.toLowerCase()))
+    .map(([k, text]) => {
+      const vNum = parseInt(k.split(':')[1], 10) || 1;
+      return { verse: vNum, text };
+    })
+    .sort((a, b) => a.verse - b.verse);
+
+  return list;
+}
+
+// Match spoken quotation or search query against FALLBACK_VERSES + public API
+export async function matchFallbackQuote(phrase, translation = 'KJV') {
+  if (!phrase || phrase.trim().length < 4) return null;
+  const clean = phrase
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length > 2);
+
+  if (clean.length === 0) return null;
+
+  let bestRef = null;
+  let bestText = null;
+  let bestScore = 0;
+
+  for (const [ref, text] of Object.entries(FALLBACK_VERSES)) {
+    const lowerText = text.toLowerCase();
+    let hits = 0;
+    for (const w of clean) {
+      if (lowerText.includes(w)) hits++;
+    }
+    const score = hits / clean.length;
+    if (hits >= 3 && score > bestScore) {
+      bestScore = score;
+      bestRef = ref;
+      bestText = text;
+    }
+  }
+
+  if (bestRef && bestScore >= 0.5) {
+    const parts = bestRef.match(/^(.+?)\s+(\d+):(\d+)$/);
+    return {
+      detected: true,
+      reference: bestRef,
+      text: bestText,
+      book: parts ? parts[1] : '',
+      chapter: parts ? Number(parts[2]) : 1,
+      verse: parts ? Number(parts[3]) : 1,
+      translation: String(translation).toUpperCase(),
+      confidence: Math.min(0.96, bestScore),
+    };
+  }
+  return null;
+}
+
 

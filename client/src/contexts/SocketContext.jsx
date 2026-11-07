@@ -3,7 +3,7 @@ import { io } from 'socket.io-client';
 import { useAuth } from './AuthContext';
 import { API_BASE, assetUrl } from '../utils/config';
 import { detectScripture, detectVoiceCommand, parseReferenceContext } from '../utils/scriptureDetector';
-import { fetchFallbackVerseText } from '../utils/bibleData';
+import { fetchFallbackVerseText, matchFallbackQuote } from '../utils/bibleData';
 import api from '../utils/api';
 import toast from 'react-hot-toast';
 
@@ -358,22 +358,35 @@ export const SocketProvider = ({ children }) => {
     }
   }, []);
 
-  // Save scripture detection to history
+  // Save scripture detection to history (both local storage and backend API)
   const saveHistory = useCallback((entry, spokenText) => {
-    api
-      .post('/scripture/history', {
-        reference: entry.reference,
-        verseText: entry.text,
-        text: entry.text,
-        translation: entry.translation,
-        confidence: entry.confidence,
-        speechText: spokenText,
-        spokenText,
-      })
-      .catch(() => { });
+    const record = {
+      id: entry.id || `${entry.reference}_${Date.now()}`,
+      reference: entry.reference,
+      verseText: entry.text,
+      text: entry.text,
+      book: entry.book || '',
+      chapter: entry.chapter || '',
+      verse: entry.verse || '',
+      translation: entry.translation,
+      confidence: entry.confidence || 0.95,
+      speechText: spokenText,
+      spokenText,
+      createdAt: new Date().toISOString(),
+      timestamp: new Date().toISOString(),
+    };
+
+    try {
+      const existingRaw = localStorage.getItem('scripturelive_local_history');
+      const existing = existingRaw ? JSON.parse(existingRaw) : [];
+      const next = [record, ...existing].slice(0, 150);
+      localStorage.setItem('scripturelive_local_history', JSON.stringify(next));
+    } catch { }
+
+    api.post('/scripture/history', record).catch(() => { });
   }, []);
 
-  // Query backend quote engine
+  // Query backend quote engine (with client-side quote fallback if server is unreachable)
   const runBackendDetection = useCallback(
     async (phrase, currentTranslation, bypassCooldown = false) => {
       const clean = phrase.trim();
@@ -381,58 +394,64 @@ export const SocketProvider = ({ children }) => {
       if (!bypassCooldown && clean === lastBackendText.current) return;
       lastBackendText.current = clean;
 
+      let data = null;
       try {
         const res = await api.post('/bible/detect', {
           text: clean,
           translation: currentTranslation,
           ignoreDebounce: bypassCooldown,
         });
-
         if (res.data && res.data.detected && res.data.reference) {
-          const data = res.data;
-          const now = Date.now();
-          if (
-            !bypassCooldown &&
-            lastDetectedRef.current === data.reference &&
-            now - lastDetectedTime.current < 2000
-          ) {
-            return;
-          }
-          lastDetectedRef.current = data.reference;
-          lastDetectedTime.current = now;
-
-          const newEntry = {
-            id: `${data.reference}_${Date.now()}`,
-            reference: data.reference,
-            text: data.text || data.verseText || '',
-            book: data.book || data.bookName || '',
-            chapter: data.chapter || '',
-            verse: data.verse || data.startVerse || '',
-            translation: (data.translation || currentTranslation).toUpperCase(),
-            confidence: data.confidence || 0.9,
-            matchedText: clean,
-            timestamp: new Date().toISOString(),
-          };
-
-          setSessionDetections((prev) => [newEntry, ...prev]);
-          saveHistory(newEntry, clean);
-
-          if (autoProjectRef.current) {
-            emitScriptureDetected(newEntry);
-            toast.success(`Projected: ${newEntry.reference} (${newEntry.translation})`, {
-              duration: 2800,
-            });
-          } else {
-            setPendingScripture(newEntry);
-            toast(`Scripture Ready: ${newEntry.reference}`, { icon: '📖' });
-          }
-        } else if (bypassCooldown) {
-          toast.error('No Bible reference, verse quote, or command matched that phrase.');
+          data = res.data;
         }
-      } catch (err) {
-        if (bypassCooldown) {
-          toast.error('Could not reach the scripture engine.');
+      } catch {
+        data = null;
+      }
+
+      if (!data) {
+        data = await matchFallbackQuote(clean, currentTranslation);
+      }
+
+      if (data && data.detected && data.reference) {
+        const now = Date.now();
+        if (
+          !bypassCooldown &&
+          lastDetectedRef.current === data.reference &&
+          now - lastDetectedTime.current < 2000
+        ) {
+          return;
         }
+        lastDetectedRef.current = data.reference;
+        lastDetectedTime.current = now;
+
+        const newEntry = {
+          id: `${data.reference}_${Date.now()}`,
+          reference: data.reference,
+          text: data.text || data.verseText || '',
+          book: data.book || data.bookName || '',
+          chapter: data.chapter || '',
+          verse: data.verse || data.startVerse || '',
+          translation: (data.translation || currentTranslation).toUpperCase(),
+          confidence: data.confidence || 0.9,
+          matchedText: clean,
+          timestamp: new Date().toISOString(),
+        };
+
+        lastScriptureContextRef.current = newEntry;
+        setSessionDetections((prev) => [newEntry, ...prev]);
+        saveHistory(newEntry, clean);
+
+        if (autoProjectRef.current) {
+          emitScriptureDetected(newEntry);
+          toast.success(`Projected: ${newEntry.reference} (${newEntry.translation})`, {
+            duration: 2800,
+          });
+        } else {
+          setPendingScripture(newEntry);
+          toast(`Scripture Ready: ${newEntry.reference}`, { icon: '📖' });
+        }
+      } else if (bypassCooldown) {
+        toast.error('No Bible reference, verse quote, or command matched that phrase.');
       }
     },
     [emitScriptureDetected, saveHistory]

@@ -42,7 +42,17 @@ const Overview = () => {
 
         if (historyRes.status === 'fulfilled' && historyRes.value.data) {
           const list = historyRes.value.data.history || historyRes.value.data;
-          setRecentScriptures(Array.isArray(list) ? list.slice(0, 10) : []);
+          if (Array.isArray(list) && list.length > 0) {
+            setRecentScriptures(list.slice(0, 10));
+          } else {
+            const localRaw = localStorage.getItem('scripturelive_local_history');
+            const localItems = localRaw ? JSON.parse(localRaw) : [];
+            setRecentScriptures(localItems.slice(0, 10));
+          }
+        } else {
+          const localRaw = localStorage.getItem('scripturelive_local_history');
+          const localItems = localRaw ? JSON.parse(localRaw) : [];
+          setRecentScriptures(localItems.slice(0, 10));
         }
 
         if (statsRes.status === 'fulfilled' && statsRes.value.data) {
@@ -52,7 +62,11 @@ const Overview = () => {
           });
         }
       } catch (e) {
-        console.warn('Could not fetch overview data:', e.message);
+        try {
+          const localRaw = localStorage.getItem('scripturelive_local_history');
+          const localItems = localRaw ? JSON.parse(localRaw) : [];
+          setRecentScriptures(localItems.slice(0, 10));
+        } catch { }
       } finally {
         setLoading(false);
       }

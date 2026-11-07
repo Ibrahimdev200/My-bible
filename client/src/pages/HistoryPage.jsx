@@ -34,22 +34,33 @@ const HistoryPage = () => {
   const [search, setSearch] = useState('');
   const [filterTranslation, setFilterTranslation] = useState('ALL');
 
-  // Load history from API
+  // Load history from API (with local browser history fallback)
   const fetchHistory = useCallback(async () => {
     setLoading(true);
     try {
       const offset = (page - 1) * limit;
       const res = await api.get(`/scripture/history?limit=${limit}&offset=${offset}`);
       if (res.data) {
-        const items = res.data.history || res.data.items || (Array.isArray(res.data) ? res.data : []);
-        setHistory(items);
-        setTotal(res.data.total || items.length);
+        const items =
+          res.data.history || res.data.items || (Array.isArray(res.data) ? res.data : []);
+        if (items.length > 0) {
+          setHistory(items);
+          setTotal(res.data.total || items.length);
+          setLoading(false);
+          return;
+        }
       }
     } catch (err) {
-      console.warn('Could not load history:', err.message);
-    } finally {
-      setLoading(false);
+      // Fall back to local browser history
     }
+
+    try {
+      const localRaw = localStorage.getItem('scripturelive_local_history');
+      const localItems = localRaw ? JSON.parse(localRaw) : [];
+      setHistory(localItems);
+      setTotal(localItems.length);
+    } catch { }
+    setLoading(false);
   }, [page]);
 
   useEffect(() => {
