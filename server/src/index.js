@@ -142,8 +142,10 @@ async function startServer() {
     // 1. Connect database (PostgreSQL with graceful SQLite fallback)
     await initDatabase();
 
-    // 2. Initialize Bible database service (sql.js)
+    // 2. Initialize Bible database service (sql.js) and pre-build the AI quote/reference index
     await bibleService.init();
+    const { scriptureDetector } = require('./services/scriptureDetector');
+    scriptureDetector.ensureEngine();
 
     // 3. Start listening on PORT
     server.listen(PORT, () => {

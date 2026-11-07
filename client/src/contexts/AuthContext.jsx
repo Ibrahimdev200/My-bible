@@ -8,8 +8,11 @@ const normalizeUser = (data) => {
   const u = data?.church || data?.user || data;
   if (!u || typeof u !== 'object') return null;
   const logo = u.logoUrl || u.logoPath;
+  const resolvedName = u.churchName || u.name || 'Faith Fellowship';
   return {
     ...u,
+    name: resolvedName,
+    churchName: resolvedName,
     logoUrl: logo ? assetUrl(logo) : null,
     branding: u.branding || u.brandingConfig || {},
     preferredTranslation: u.preferredTranslation || u.selectedTranslation || 'KJV',

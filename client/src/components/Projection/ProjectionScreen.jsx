@@ -6,15 +6,29 @@ import { Maximize2, Minimize2, BookOpen, Sparkles } from 'lucide-react';
 import api from '../../utils/api';
 
 const ProjectionScreen = ({ previewMode = false, overrideScripture = null, overrideBranding = null }) => {
-  const { currentScripture: socketScripture } = useSocket();
+  const { currentScripture: socketScripture, emitClearProjection } = useSocket();
   const { user } = useAuth();
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [churchBranding, setChurchBranding] = useState(null);
   const containerRef = useRef(null);
 
-  // Active scripture from prop override (for preview) or socket context
-  const scripture = overrideScripture !== undefined ? overrideScripture : socketScripture;
+  // Active scripture from prop override (when provided) or socket context
+  const scripture = overrideScripture || socketScripture;
+
+  // Allow Escape key on full projection screen to clear scripture, F key to toggle fullscreen
+  useEffect(() => {
+    if (previewMode) return;
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape' && scripture && !document.fullscreenElement) {
+        emitClearProjection();
+      } else if ((e.key === 'f' || e.key === 'F') && e.target.tagName !== 'INPUT') {
+        toggleFullscreen();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [previewMode, scripture, emitClearProjection]);
 
   // Active branding: props override or user branding or fetched branding
   const activeBranding = overrideBranding || user?.branding || churchBranding || {

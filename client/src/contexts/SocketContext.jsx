@@ -9,7 +9,14 @@ export const SocketProvider = ({ children }) => {
   const { token, user } = useAuth();
   const [socket, setSocket] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
-  const [currentScripture, setCurrentScripture] = useState(null);
+  const [currentScripture, setCurrentScripture] = useState(() => {
+    try {
+      const saved = localStorage.getItem('scripturelive_active_scripture');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
   const [displayDuration, setDisplayDuration] = useState(15);
   const [liveTranscript, setLiveTranscript] = useState('');
   const [isMicListening, setIsMicListening] = useState(false);
@@ -108,6 +115,9 @@ export const SocketProvider = ({ children }) => {
     };
 
     setCurrentScripture(payload);
+    try {
+      localStorage.setItem('scripturelive_active_scripture', JSON.stringify(payload));
+    } catch {}
 
     // Cross-tab broadcast
     if (channelRef.current) {
@@ -123,8 +133,21 @@ export const SocketProvider = ({ children }) => {
     if (timerRef.current) clearTimeout(timerRef.current);
     if (displayDuration > 0) {
       timerRef.current = setTimeout(() => {
-        // Only clear if still showing this scripture
-        setCurrentScripture((prev) => (prev?.reference === payload.reference ? null : prev));
+        setCurrentScripture((prev) => {
+          if (prev?.reference === payload.reference) {
+            try {
+              localStorage.removeItem('scripturelive_active_scripture');
+            } catch {}
+            if (channelRef.current) {
+              channelRef.current.postMessage({ type: 'CLEAR_PROJECTION' });
+            }
+            if (socket && socket.connected) {
+              socket.emit('clear-projection', { churchId: payload.churchId });
+            }
+            return null;
+          }
+          return prev;
+        });
       }, displayDuration * 1000);
     }
   }, [socket, user, displayDuration]);
@@ -133,6 +156,9 @@ export const SocketProvider = ({ children }) => {
   const emitClearProjection = useCallback(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
     setCurrentScripture(null);
+    try {
+      localStorage.removeItem('scripturelive_active_scripture');
+    } catch {}
 
     if (channelRef.current) {
       channelRef.current.postMessage({ type: 'CLEAR_PROJECTION' });

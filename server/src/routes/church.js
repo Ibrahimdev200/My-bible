@@ -69,10 +69,11 @@ router.put(
         return res.status(400).json({ errors: errors.array() });
       }
 
-      const { name, pastorName, phone, country, state, address } = req.body;
+      const { name, churchName, pastorName, phone, country, state, address } = req.body;
       const church = req.church;
 
-      if (name !== undefined) church.name = name;
+      const resolvedName = name !== undefined ? name : churchName;
+      if (resolvedName !== undefined && resolvedName.trim()) church.name = resolvedName.trim();
       if (pastorName !== undefined) church.pastorName = pastorName;
       if (phone !== undefined) church.phone = phone;
       if (country !== undefined) church.country = country;
@@ -176,7 +177,9 @@ router.put('/branding', authMiddleware, async (req, res) => {
       ...(backgroundColor !== undefined && { backgroundColor }),
       ...(textColor !== undefined && { textColor }),
       ...(template !== undefined && { template }),
-      ...(displayDuration !== undefined && { displayDuration: parseInt(displayDuration, 10) || 15 }),
+      ...(displayDuration !== undefined && {
+        displayDuration: Number.isFinite(parseInt(displayDuration, 10)) ? parseInt(displayDuration, 10) : 15
+      }),
       ...(fontSize !== undefined && { fontSize })
     };
 

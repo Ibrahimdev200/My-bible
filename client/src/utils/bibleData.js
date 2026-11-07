@@ -76,3 +76,17 @@ export const TRANSLATIONS = [
   { code: 'ASV', name: 'American Standard Version', year: '1901' },
   { code: 'YLT', name: "Young's Literal Translation", year: '1898' },
 ];
+
+export function findBibleBook(query) {
+  if (!query) return null;
+  const q = String(query).trim().toLowerCase();
+  return (
+    BIBLE_BOOKS.find(
+      (b) =>
+        b.id.toLowerCase() === q ||
+        b.name.toLowerCase() === q ||
+        (b.aliases && b.aliases.includes(q))
+    ) || null
+  );
+}
+

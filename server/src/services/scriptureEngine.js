@@ -497,8 +497,8 @@ function confidenceFor(sc) {
     const c = 0.6 + 0.26 * strength + 0.04 * Math.min(1, (sc.precision - 0.8) / 0.2) + 0.03 * sc.order;
     return Math.min(0.9, c);
   }
-  // short but very distinctive fragment ("He restoreth my soul"): suggest only, operator confirms
-  if (sc.matched >= 3 && sc.m >= 12 && sc.precision >= 0.9 && sc.order >= 0.9) {
+  // short but very distinctive fragment (4+ words with high rarity): suggest only, operator confirms
+  if (sc.matched >= 4 && sc.m >= 16 && sc.precision >= 0.92 && sc.order >= 0.9 && sc.recall >= 0.35) {
     return 0.68;
   }
   return 0;
@@ -551,6 +551,7 @@ function matchQuote(bibleService, speechText) {
   if (ranked.length > 1 && ranked[1].conf >= best.conf - 0.04) {
     confidence -= 0.1; // two verses fit equally well (parallel passages) -> ask the operator
   }
+  if (confidence < 0.65) return null;
   const bookId = index.bookId[best.row];
   const book = CANONICAL_BOOKS.find((b) => b.id === bookId);
   const chapter = index.chapter[best.row];

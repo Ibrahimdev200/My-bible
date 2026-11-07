@@ -34,11 +34,21 @@ router.get(
         offset
       });
 
+      const formattedRows = rows.map((r) => {
+        const json = r.toJSON();
+        return {
+          ...json,
+          text: json.verseText,
+          spokenText: json.speechText,
+          timestamp: json.detectedAt
+        };
+      });
+
       return res.status(200).json({
         total: count,
         limit,
         offset,
-        history: rows
+        history: formattedRows
       });
     } catch (error) {
       console.error('Get history error:', error);
@@ -54,12 +64,23 @@ router.get(
 router.post(
   '/history',
   authMiddleware,
+  (req, res, next) => {
+    if (req.body) {
+      if (!req.body.verseText && req.body.text) {
+        req.body.verseText = String(req.body.text);
+      }
+      if (!req.body.speechText && req.body.spokenText) {
+        req.body.speechText = String(req.body.spokenText);
+      }
+    }
+    next();
+  },
   [
     body('reference').trim().notEmpty().withMessage('Scripture reference is required'),
     body('verseText').trim().notEmpty().withMessage('Verse text is required'),
     body('translation').optional().trim(),
-    body('speechText').optional().trim(),
-    body('confidence').optional().isFloat({ min: 0, max: 1 })
+    body('speechText').optional({ nullable: true }).trim(),
+    body('confidence').optional({ nullable: true }).isFloat({ min: 0, max: 1 })
   ],
   async (req, res) => {
     try {

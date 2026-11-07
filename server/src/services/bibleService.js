@@ -271,7 +271,7 @@ class BibleService {
   }
 
   /**
-   * Search verses matching query.
+   * Search verses matching query (supports direct references, exact phrases, and multi-word keywords).
    */
   searchVerses(query, translation = 'KJV', limit = 20) {
     if (!this.isAvailable()) {
@@ -282,17 +282,75 @@ class BibleService {
       return [];
     }
 
+    const q = query.trim();
+    const trans = translation.toUpperCase();
     const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
-    const sql = `
-      SELECT v.*, b.name AS book_name 
-      FROM verses v 
-      JOIN books b ON v.book_id = b.id 
-      WHERE v.text LIKE ? AND UPPER(v.translation) = ? 
-      ORDER BY v.book_id ASC, v.chapter ASC, v.verse ASC 
-      LIMIT ?
-    `;
+    const results = [];
+    const seen = new Set();
 
-    return this.executeQuery(sql, [`%${query.trim()}%`, translation.toUpperCase(), safeLimit]);
+    const addRows = (rows) => {
+      for (const r of rows) {
+        const key = `${r.book_id}:${r.chapter}:${r.verse}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          results.push({
+            ...r,
+            reference: `${r.book_name} ${r.chapter}:${r.verse}`
+          });
+          if (results.length >= safeLimit) break;
+        }
+      }
+    };
+
+    // 1. Check if query is itself a scripture reference (e.g. "John 3:16", "Psalm 23")
+    try {
+      const parsed = this.parseReference(q);
+      if (parsed) {
+        const refData = this.getVersesByReference(q, trans);
+        if (refData && Array.isArray(refData.verses)) {
+          addRows(refData.verses.slice(0, safeLimit));
+        }
+      }
+    } catch (_) {}
+
+    // 2. Exact phrase match
+    if (results.length < safeLimit) {
+      const sql = `
+        SELECT v.*, b.name AS book_name 
+        FROM verses v 
+        JOIN books b ON v.book_id = b.id 
+        WHERE v.text LIKE ? AND UPPER(v.translation) = ? 
+        ORDER BY v.book_id ASC, v.chapter ASC, v.verse ASC 
+        LIMIT ?
+      `;
+      addRows(this.executeQuery(sql, [`%${q}%`, trans, safeLimit - results.length]));
+    }
+
+    // 3. Multi-keyword match if exact substring didn't fill the results
+    if (results.length < safeLimit) {
+      const words = q
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter((w) => w.length >= 3)
+        .slice(0, 6);
+
+      if (words.length >= 2) {
+        const clauses = words.map(() => 'LOWER(v.text) LIKE ?').join(' AND ');
+        const sql = `
+          SELECT v.*, b.name AS book_name 
+          FROM verses v 
+          JOIN books b ON v.book_id = b.id 
+          WHERE (${clauses}) AND UPPER(v.translation) = ? 
+          ORDER BY v.book_id ASC, v.chapter ASC, v.verse ASC 
+          LIMIT ?
+        `;
+        const params = [...words.map((w) => `%${w}%`), trans, safeLimit - results.length];
+        addRows(this.executeQuery(sql, params));
+      }
+    }
+
+    return results;
   }
 
   /**
@@ -504,15 +562,27 @@ class BibleService {
       verses = this.getVerses(bookId, parsed.chapter, translation);
     }
 
-    const combinedText = verses.map((v) => `${v.verse}. ${v.text}`).join(' ');
+    const combinedText = verses
+      .map((v) => (verses.length > 1 ? `[${v.verse}] ${v.text}` : v.text))
+      .join(' ');
 
     return {
       reference: referenceString,
       parsed,
       book,
+      bookName: book,
+      chapter: parsed.chapter || parsed.startChapter || (verses[0] ? verses[0].chapter : 1),
+      startVerse: parsed.startVerse || (verses[0] ? verses[0].verse : 1),
+      endVerse: parsed.endVerse || (verses[verses.length - 1] ? verses[verses.length - 1].verse : 1),
+      verse: parsed.startVerse
+        ? parsed.endVerse && parsed.endVerse !== parsed.startVerse
+          ? `${parsed.startVerse}-${parsed.endVerse}`
+          : parsed.startVerse
+        : `1-${verses.length}`,
       translation: translation.toUpperCase(),
       count: verses.length,
       verses,
+      text: combinedText,
       combinedText
     };
   }

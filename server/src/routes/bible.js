@@ -329,11 +329,24 @@ router.post(
         } catch (e) {}
       }
 
+      const resolvedText = verseData
+        ? verseData.text || verseData.combinedText
+        : detected.verseText || '';
+
       return res.status(200).json({
         detected: true,
         ...detected,
-        verseData: verseData ? verseData.verses : null,
-        fullText: verseData ? verseData.combinedText : (detected.verseText || null)
+        book: detected.bookName,
+        verse: detected.startVerse
+          ? detected.endVerse && detected.endVerse !== detected.startVerse
+            ? `${detected.startVerse}-${detected.endVerse}`
+            : detected.startVerse
+          : 1,
+        translation: translation.toUpperCase(),
+        text: resolvedText,
+        verseText: resolvedText,
+        fullText: resolvedText,
+        verseData: verseData ? verseData.verses : null
       });
     } catch (error) {
       console.error('Detect scripture error:', error);
