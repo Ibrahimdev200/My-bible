@@ -1,7 +1,7 @@
 import React from 'react';
 import { BookOpen } from 'lucide-react';
 
-const LoadingSpinner = ({ size = 'md', message = 'Loading ScriptureLive AI...' }) => {
+const LoadingSpinner = ({ size = 'md', message = 'Loading ScriptureLive...' }) => {
   const sizeClasses = {
     sm: 'w-6 h-6 border-2',
     md: 'w-10 h-10 border-3',

@@ -28,7 +28,7 @@ const Landing = () => {
               Scripture<span className="text-gold-500">Live</span>
             </span>
             <span className="block text-[10px] font-semibold tracking-widest uppercase text-gold-400/80">
-              AI Projection
+              Sanctuary Projection
             </span>
           </div>
         </Link>
@@ -55,20 +55,20 @@ const Landing = () => {
         <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[400px] bg-gold-500/10 blur-[130px] rounded-full pointer-events-none" />
 
         <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-gold-500/15 border border-gold-500/30 text-gold-400 text-xs font-semibold mb-6 animate-fade-in">
-          <Sparkles className="w-3.5 h-3.5" />
-          <span>Next-Generation Live Church Technology</span>
+          <BookOpen className="w-3.5 h-3.5" />
+          <span>Professional Sanctuary Presentation System</span>
         </div>
 
         <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-extrabold font-display tracking-tight text-white max-w-4xl leading-[1.1] mb-6">
-          AI-Powered Bible Scripture Recognition for{' '}
+          Automatic Bible Scripture Recognition for{' '}
           <span className="text-transparent bg-clip-text bg-gradient-to-r from-gold-400 via-gold-500 to-amber-500">
             Live Church Projection
           </span>
         </h1>
 
         <p className="text-base sm:text-lg md:text-xl text-slate-300 max-w-2xl leading-relaxed mb-10">
-          Listen to sermon preaching in real time. Our voice AI automatically identifies Bible
-          scripture references and broadcasts them seamlessly to your church screens.
+          Listen to sermon preaching in real time. Instant voice recognition captures Bible
+          scripture references and spoken verses and broadcasts them seamlessly to your church screens.
         </p>
 
         {/* CTA Buttons */}
@@ -102,15 +102,15 @@ const Landing = () => {
               <h2 className="text-3xl sm:text-4xl md:text-5xl font-black font-display text-gold-400 mb-4">
                 John 3:16
               </h2>
-              <p className="text-base sm:text-xl md:text-2xl font-scripture text-slate-100 leading-relaxed max-w-2xl mx-auto italic drop-shadow">
+              <p className="text-base sm:text-xl md:text-2xl font-scripture font-semibold text-slate-100 leading-relaxed max-w-2xl mx-auto drop-shadow">
                 “For God so loved the world, that he gave his only begotten Son, that whosoever
                 believeth in him should not perish, but have everlasting life.”
               </p>
             </div>
 
             <div className="flex items-center justify-between text-[11px] text-slate-500">
-              <span>AI Auto-Detected in 0.2s</span>
-              <span>ScriptureLive Broadcast Output</span>
+              <span>King James Version (KJV)</span>
+              <span>Sanctuary Broadcast Output</span>
             </div>
           </div>
         </div>
@@ -132,8 +132,8 @@ const Landing = () => {
             {[
               {
                 icon: Mic,
-                title: 'Real-time AI Detection',
-                desc: 'Web Speech recognition listens to preacher speech and detects chapter and verse references with precision.',
+                title: 'Real-Time Voice Capture',
+                desc: 'Continuous voice recognition listens to preaching and captures chapter and verse references with instant precision.',
               },
               {
                 icon: Layers,
@@ -179,7 +179,7 @@ const Landing = () => {
       <footer className="px-6 md:px-12 py-12 border-t border-navy-800 max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-400">
         <div className="flex items-center gap-2">
           <BookOpen className="w-4 h-4 text-gold-500" />
-          <span className="font-bold text-white font-display">ScriptureLive AI</span>
+          <span className="font-bold text-white font-display">ScriptureLive</span>
           <span>© {new Date().getFullYear()} All rights reserved.</span>
         </div>
         <div className="flex items-center gap-6">

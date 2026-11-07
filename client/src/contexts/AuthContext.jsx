@@ -94,7 +94,7 @@ export const AuthProvider = ({ children }) => {
         handleSetToken(authToken);
       }
       setUser(authUser);
-      toast.success('Registration successful! Welcome to ScriptureLive AI.');
+      toast.success('Registration successful! Welcome to ScriptureLive.');
       return { success: true, user: authUser };
     } catch (error) {
       const msg = getErrorMessage(error, 'Registration failed. Please check your details.');

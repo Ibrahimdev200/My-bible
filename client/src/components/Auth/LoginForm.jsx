@@ -53,7 +53,7 @@ const LoginForm = () => {
               Scripture<span className="text-gold-500">Live</span>
             </h1>
             <span className="text-xs font-semibold tracking-wider uppercase text-gold-400/80">
-              AI Projection
+              Sanctuary Projection
             </span>
           </div>
         </Link>

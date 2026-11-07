@@ -169,12 +169,12 @@ const RegisterForm = () => {
               Scripture<span className="text-gold-500">Live</span>
             </h1>
             <span className="text-xs font-semibold tracking-wider uppercase text-gold-400/80">
-              AI Projection
+              Sanctuary Projection
             </span>
           </div>
         </Link>
         <h2 className="text-2xl font-bold text-white font-display">Register Your Church</h2>
-        <p className="text-xs text-slate-400 mt-1">Set up your account for AI scripture projection</p>
+        <p className="text-xs text-slate-400 mt-1">Set up your church account for live scripture projection</p>
       </div>
 
       {/* Stepper Progress */}

@@ -36,7 +36,7 @@ const Sidebar = () => {
               Scripture<span className="text-gold-500">Live</span>
             </div>
             <div className="text-[10px] font-semibold tracking-wider uppercase text-gold-400/80">
-              AI Projection
+              Sanctuary Projection
             </div>
           </div>
         </Link>

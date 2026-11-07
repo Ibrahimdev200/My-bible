@@ -10,11 +10,10 @@ import api from '../../utils/api';
 import {
   Mic,
   Clock,
-  Sparkles,
+  BookOpen,
   Send,
   XCircle,
   Volume2,
-  Wand2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -47,9 +46,11 @@ const LiveDetection = () => {
   const [sessionDetections, setSessionDetections] = useState([]);
   const [autoProject, setAutoProject] = useState(true);
 
-  // Keep a reference of recently matched refs to prevent spamming duplicate events
+  // Fast deduplication & interim quote debounce refs
   const lastDetectedRef = useRef('');
   const lastDetectedTime = useRef(0);
+  const interimQuoteTimer = useRef(null);
+  const lastBackendText = useRef('');
 
   // Sync mic state to socket context for top header
   const handleStatusChange = (status) => {
@@ -72,23 +73,94 @@ const LiveDetection = () => {
       .catch(() => {});
   }, []);
 
-  // Process live transcript or simulated speech
+  // Query backend quote engine (called immediately on final speech or after 320ms of interim speech)
+  const runBackendDetection = useCallback(
+    async (phrase, currentTranslation, bypassCooldown = false) => {
+      const clean = phrase.trim();
+      if (!clean) return;
+      if (!bypassCooldown && clean === lastBackendText.current) return;
+      lastBackendText.current = clean;
+
+      try {
+        const res = await api.post('/bible/detect', {
+          text: clean,
+          translation: currentTranslation,
+          ignoreDebounce: bypassCooldown,
+        });
+
+        if (res.data && res.data.detected && res.data.reference) {
+          const data = res.data;
+          const now = Date.now();
+          if (
+            !bypassCooldown &&
+            lastDetectedRef.current === data.reference &&
+            now - lastDetectedTime.current < 2200
+          ) {
+            return;
+          }
+          lastDetectedRef.current = data.reference;
+          lastDetectedTime.current = now;
+
+          const newEntry = {
+            id: `${data.reference}_${Date.now()}`,
+            reference: data.reference,
+            text: data.text || data.verseText || '',
+            book: data.book || data.bookName || '',
+            chapter: data.chapter || '',
+            verse: data.verse || data.startVerse || '',
+            translation: (data.translation || currentTranslation).toUpperCase(),
+            confidence: data.confidence || 0.9,
+            matchedText: clean,
+            timestamp: new Date().toISOString(),
+          };
+
+          setSessionDetections((prev) => [newEntry, ...prev]);
+          saveHistory(newEntry, clean);
+
+          if (autoProject) {
+            emitScriptureDetected(newEntry);
+            toast.success(`Projected: ${newEntry.reference} (${newEntry.translation})`, {
+              duration: 3000,
+            });
+          } else {
+            setPendingScripture(newEntry);
+            toast(`Scripture Ready: ${newEntry.reference}`, { icon: '📖' });
+          }
+        } else if (bypassCooldown) {
+          toast.error('No Bible reference or verse quote matched that phrase.');
+        }
+      } catch (err) {
+        if (bypassCooldown) {
+          toast.error('Could not reach the scripture engine.');
+        }
+      }
+    },
+    [autoProject, emitScriptureDetected, saveHistory]
+  );
+
+  // Process live transcript (instant on both interim and final speech)
   const handleTranscript = useCallback(
-    async (text, isFinal, bypassCooldown = false) => {
+    async (text, isFinal, bypassCooldown = false, rollingWindow = '') => {
       if (!text || !text.trim()) return;
       setLiveTranscript(text);
 
-      const currentTranslation = user?.preferredTranslation || 'KJV';
+      const currentTranslation = (user?.preferredTranslation || 'KJV').toUpperCase();
+      const candidateText = rollingWindow && rollingWindow.length > text.length ? rollingWindow : text;
 
-      // Run client-side reference detector first for instant reference response
-      const detected = detectScripture(text);
+      // 1. Instant client-side reference detection (0ms latency on interim speech)
+      const detected = detectScripture(text) || (rollingWindow ? detectScripture(rollingWindow) : null);
 
       if (detected) {
+        if (interimQuoteTimer.current) {
+          clearTimeout(interimQuoteTimer.current);
+          interimQuoteTimer.current = null;
+        }
+
         const now = Date.now();
         if (
           !bypassCooldown &&
           lastDetectedRef.current === detected.reference &&
-          now - lastDetectedTime.current < 4000
+          now - lastDetectedTime.current < 2200
         ) {
           return;
         }
@@ -96,7 +168,6 @@ const LiveDetection = () => {
         lastDetectedRef.current = detected.reference;
         lastDetectedTime.current = now;
 
-        // Fetch verse text from backend reference endpoint
         let verseText = '';
         try {
           const res = await api.get(
@@ -106,8 +177,10 @@ const LiveDetection = () => {
             verseText = res.data.text || res.data.verses || '';
           }
         } catch (e) {
-          verseText = `Scripture reference ${detected.reference} detected.`;
+          verseText = '';
         }
+
+        if (!verseText) return;
 
         const newEntry = {
           id: `${detected.reference}_${Date.now()}`,
@@ -127,9 +200,8 @@ const LiveDetection = () => {
 
         if (autoProject) {
           emitScriptureDetected(newEntry);
-          toast.success(`AI Detected & Projected: ${newEntry.reference}`, {
-            icon: '✨',
-            duration: 3500,
+          toast.success(`Projected: ${newEntry.reference} (${currentTranslation})`, {
+            duration: 3000,
           });
         } else {
           setPendingScripture(newEntry);
@@ -137,68 +209,28 @@ const LiveDetection = () => {
             icon: '📖',
           });
         }
-      } else if (isFinal) {
-        // Send final phrase to backend AI detector for quotation/semantic matching
-        try {
-          const res = await api.post('/bible/detect', {
-            text,
-            translation: currentTranslation,
-          });
-          if (res.data && res.data.detected && res.data.reference) {
-            const data = res.data;
-            const now = Date.now();
-            if (
-              !bypassCooldown &&
-              lastDetectedRef.current === data.reference &&
-              now - lastDetectedTime.current < 4000
-            ) {
-              return;
-            }
-            lastDetectedRef.current = data.reference;
-            lastDetectedTime.current = now;
+        return;
+      }
 
-            const newEntry = {
-              id: `${data.reference}_${Date.now()}`,
-              reference: data.reference,
-              text: data.text || data.verseText || '',
-              book: data.book || data.bookName || '',
-              chapter: data.chapter || '',
-              verse: data.verse || data.startVerse || '',
-              translation: data.translation || currentTranslation,
-              confidence: data.confidence || 0.85,
-              matchedText: text,
-              timestamp: new Date().toISOString(),
-            };
-
-            setSessionDetections((prev) => [newEntry, ...prev]);
-            saveHistory(newEntry, text);
-
-            if (autoProject) {
-              emitScriptureDetected(newEntry);
-              toast.success(`AI Quote Matched: ${newEntry.reference}`, {
-                icon: '✨',
-                duration: 3500,
-              });
-            } else {
-              setPendingScripture(newEntry);
-              toast(`Matched Quote: ${newEntry.reference} (Awaiting confirmation)`, {
-                icon: '📖',
-              });
-            }
-          } else if (bypassCooldown) {
-            toast.error('No Bible reference or verse quote detected in that phrase.');
-          }
-        } catch (err) {
-          if (bypassCooldown) {
-            toast.error('Failed to analyze phrase against Bible engine.');
-          }
+      // 2. Spoken Scripture Quote Detection (works during live speech without waiting for a long pause)
+      const wordCount = candidateText.trim().split(/\s+/).length;
+      if (isFinal) {
+        if (interimQuoteTimer.current) {
+          clearTimeout(interimQuoteTimer.current);
+          interimQuoteTimer.current = null;
         }
+        await runBackendDetection(candidateText, currentTranslation, bypassCooldown);
+      } else if (wordCount >= 5) {
+        if (interimQuoteTimer.current) clearTimeout(interimQuoteTimer.current);
+        interimQuoteTimer.current = setTimeout(() => {
+          runBackendDetection(candidateText, currentTranslation, false);
+        }, 320);
       }
     },
-    [autoProject, emitScriptureDetected, saveHistory, user]
+    [autoProject, emitScriptureDetected, runBackendDetection, saveHistory, user]
   );
 
-  // Trigger manual/simulated speech test
+  // Trigger manual speech or quick reference test
   const handleManualSubmit = async (e) => {
     e.preventDefault();
     if (!manualInput.trim()) return;
@@ -242,11 +274,11 @@ const LiveDetection = () => {
         <div>
           <h1 className="text-2xl font-bold text-white font-display flex items-center gap-2">
             <Mic className="w-6 h-6 text-gold-400" />
-            <span>Live AI Speech Recognition</span>
+            <span>Live Voice Scripture Capture</span>
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            Real-time speech recognition listens to preaching, identifies Bible references or direct
-            quotes, and projects them automatically.
+            High-speed voice recognition listens to the sermon, captures Bible references and
+            spoken verses, and projects them immediately.
           </p>
         </div>
 
@@ -260,7 +292,7 @@ const LiveDetection = () => {
               onChange={(e) => setAutoProject(e.target.checked)}
               className="rounded bg-navy-950 border-navy-700 text-gold-500 focus:ring-gold-500 cursor-pointer"
             />
-            <span>Auto-Project on Detection</span>
+            <span>Auto-Project on Capture</span>
           </label>
 
           {/* Display Duration Selector */}
@@ -314,13 +346,13 @@ const LiveDetection = () => {
             </div>
           </div>
 
-          {/* Live Transcript Stream Card */}
+          {/* Live Transcript Stream & Quick Operator Entry */}
           <div className="bg-navy-900 border border-navy-800 rounded-2xl p-5 shadow-xl flex flex-col space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-navy-800">
               <div className="flex items-center gap-2">
                 <Volume2 className="w-4 h-4 text-gold-400" />
                 <h3 className="text-xs font-bold uppercase tracking-wider text-white font-display">
-                  Live Transcript & AI Simulator
+                  Live Voice Transcript & Operator Quick Entry
                 </h3>
               </div>
               {liveTranscript && (
@@ -342,20 +374,20 @@ const LiveDetection = () => {
               ) : (
                 <p className="text-xs text-slate-500 italic text-center py-3">
                   {isListening
-                    ? 'Listening... Speak a Bible reference or quote a verse...'
-                    : 'Turn on the microphone above, or test with a phrase below.'}
+                    ? 'Listening live... Speak a Bible reference or quote a verse...'
+                    : 'Activate the microphone above, or type a reference/quote below.'}
                 </p>
               )}
             </div>
 
-            {/* Manual / Simulated Speech Input */}
+            {/* Operator Quick Reference / Quote Input */}
             <form onSubmit={handleManualSubmit} className="space-y-2.5 pt-1">
               <div className="flex items-center gap-2">
                 <input
                   type="text"
                   value={manualInput}
                   onChange={(e) => setManualInput(e.target.value)}
-                  placeholder='Type a spoken phrase or verse quote (e.g. "Turn to John 3:16" or "For God so loved the world...")'
+                  placeholder='Type a spoken reference or verse quote (e.g. "John 3:16" or "For God so loved the world...")'
                   className="flex-1 px-3.5 py-2 bg-navy-950 border border-navy-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-gold-500"
                 />
                 <button
@@ -363,15 +395,15 @@ const LiveDetection = () => {
                   disabled={isAnalyzingManual || !manualInput.trim()}
                   className="px-4 py-2 rounded-xl bg-gold-500 hover:bg-gold-400 disabled:opacity-50 text-navy-950 text-xs font-bold flex items-center gap-1.5 shadow transition-all cursor-pointer"
                 >
-                  <Wand2 className="w-3.5 h-3.5" />
-                  <span>Detect & Project</span>
+                  <Send className="w-3.5 h-3.5" />
+                  <span>Project Verse</span>
                 </button>
               </div>
 
-              {/* 1-Click Sample Preaching Phrases */}
+              {/* Quick Sample Phrases */}
               <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="text-[11px] font-semibold text-slate-400 mr-1">
-                  Try sample speech:
+                  Quick test phrases:
                 </span>
                 {SAMPLE_UTTERANCES.map((sample) => (
                   <button
@@ -392,17 +424,14 @@ const LiveDetection = () => {
             <div className="p-5 rounded-2xl bg-gold-500/10 border-2 border-gold-500 shadow-2xl flex flex-col gap-3 animate-fade-in">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-gold-400" />
+                  <BookOpen className="w-5 h-5 text-gold-400" />
                   <span className="text-sm font-bold text-white font-display">
-                    Pending Scripture Match: {pendingScripture.reference}
-                  </span>
-                  <span className="text-[10px] px-2 py-0.5 rounded bg-gold-500/20 text-gold-400 font-bold">
-                    {Math.round(pendingScripture.confidence * 100)}% Match
+                    Scripture Ready: {pendingScripture.reference} ({pendingScripture.translation})
                   </span>
                 </div>
               </div>
 
-              <p className="text-sm text-slate-200 font-scripture bg-navy-950/80 p-3 rounded-xl border border-navy-800">
+              <p className="text-sm text-slate-100 font-scripture font-semibold bg-navy-950/80 p-3.5 rounded-xl border border-navy-800">
                 “{pendingScripture.text}”
               </p>
 
@@ -418,7 +447,7 @@ const LiveDetection = () => {
                   className="px-5 py-2 rounded-xl bg-gold-500 hover:bg-gold-400 text-navy-950 text-xs font-bold flex items-center gap-2 shadow-lg shadow-gold-500/20 cursor-pointer"
                 >
                   <Send className="w-3.5 h-3.5" />
-                  <span>Push to Screen</span>
+                  <span>Project to Screen</span>
                 </button>
               </div>
             </div>

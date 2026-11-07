@@ -2,15 +2,22 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useSocket } from '../../contexts/SocketContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Maximize2, Minimize2, BookOpen, Sparkles } from 'lucide-react';
+import { Maximize2, Minimize2, BookOpen } from 'lucide-react';
 import api from '../../utils/api';
+import { assetUrl } from '../../utils/config';
+import { TRANSLATIONS } from '../../utils/bibleData';
 
-const ProjectionScreen = ({ previewMode = false, overrideScripture = null, overrideBranding = null }) => {
+const ProjectionScreen = ({
+  previewMode = false,
+  overrideScripture = null,
+  overrideBranding = null,
+}) => {
   const { currentScripture: socketScripture, emitClearProjection } = useSocket();
   const { user } = useAuth();
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [churchBranding, setChurchBranding] = useState(null);
+  const [logoFailed, setLogoFailed] = useState(false);
   const containerRef = useRef(null);
 
   // Active scripture from prop override (when provided) or socket context
@@ -31,36 +38,41 @@ const ProjectionScreen = ({ previewMode = false, overrideScripture = null, overr
   }, [previewMode, scripture, emitClearProjection]);
 
   // Active branding: props override or user branding or fetched branding
-  const activeBranding = overrideBranding || user?.branding || churchBranding || {
-    template: 'classic',
-    primaryColor: '#f99307',
-    secondaryColor: '#1a3dff',
-    backgroundColor: '#0b1137',
-    textColor: '#ffffff',
-    fontSize: 48,
-  };
+  const activeBranding = overrideBranding ||
+    user?.branding ||
+    churchBranding || {
+      template: 'classic',
+      primaryColor: '#f99307',
+      secondaryColor: '#1a3dff',
+      backgroundColor: '#0b1137',
+      textColor: '#ffffff',
+      fontSize: 48,
+    };
 
   // Fetch church branding on load if not available
   useEffect(() => {
     if (!user?.branding && !overrideBranding) {
-      api.get('/church/branding')
+      api
+        .get('/church/branding')
         .then((res) => {
           if (res.data) setChurchBranding(res.data.branding || res.data);
         })
-        .catch(() => {
-          // Defaults are already set
-        });
+        .catch(() => {});
     }
   }, [user, overrideBranding]);
 
   // Fullscreen toggle
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
-    } else {
-      if (document.exitFullscreen) {
-        document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
-      }
+      document.documentElement
+        .requestFullscreen()
+        .then(() => setIsFullscreen(true))
+        .catch(() => {});
+    } else if (document.exitFullscreen) {
+      document
+        .exitFullscreen()
+        .then(() => setIsFullscreen(false))
+        .catch(() => {});
     }
   };
 
@@ -76,115 +88,157 @@ const ProjectionScreen = ({ previewMode = false, overrideScripture = null, overr
   const getDynamicFontSize = (text = '') => {
     const len = text.length;
     if (len === 0) return 'text-3xl md:text-5xl';
-    if (len < 80) return 'text-4xl md:text-5xl lg:text-6xl';
-    if (len < 180) return 'text-3xl md:text-4xl lg:text-5xl';
-    if (len < 320) return 'text-2xl md:text-3xl lg:text-4xl';
-    if (len < 500) return 'text-xl md:text-2xl lg:text-3xl';
-    return 'text-lg md:text-xl lg:text-2xl';
+    if (len < 90) return 'text-3xl sm:text-4xl md:text-5xl lg:text-6xl';
+    if (len < 190) return 'text-2xl sm:text-3xl md:text-4xl lg:text-5xl';
+    if (len < 340) return 'text-xl sm:text-2xl md:text-3xl lg:text-4xl';
+    if (len < 520) return 'text-lg sm:text-xl md:text-2xl lg:text-3xl';
+    return 'text-base sm:text-lg md:text-xl lg:text-2xl';
   };
 
   const template = activeBranding.template || 'classic';
 
-  // Template-specific style classes
+  // Template-specific style classes (all use semi-bold attractive typography for projected scripture)
   const getTemplateStyles = () => {
     switch (template.toLowerCase()) {
       case 'light':
         return {
-          wrapper: 'bg-gradient-to-br from-amber-50 via-slate-100 to-amber-100 text-slate-900',
-          churchName: 'text-slate-600',
-          reference: 'text-amber-800 font-bold',
-          verseText: 'text-slate-900 font-scripture',
-          badge: 'bg-amber-900/10 text-amber-900 border-amber-900/20',
-          accent: '#b74b06',
+          wrapper: 'bg-gradient-to-br from-amber-50 via-stone-100 to-amber-100 text-slate-900',
+          churchName: 'text-slate-800',
+          reference: 'text-amber-800 font-extrabold',
+          verseText: 'text-slate-900 font-scripture font-semibold',
+          badge: 'bg-amber-900/15 text-amber-950 border-amber-900/30',
+          frame: 'border-amber-900/15 bg-white/60',
+          divider: 'from-transparent via-amber-700/50 to-transparent',
         };
       case 'modern':
         return {
-          wrapper: 'bg-gradient-to-br from-navy-950 via-blue-950 to-indigo-950 text-white',
-          churchName: 'text-blue-300 font-display',
+          wrapper: 'bg-gradient-to-br from-navy-950 via-slate-950 to-indigo-950 text-white',
+          churchName: 'text-slate-100 font-display',
           reference: 'text-sky-400 font-extrabold font-display',
-          verseText: 'text-white font-sans font-medium tracking-normal',
-          badge: 'bg-sky-500/15 text-sky-300 border-sky-400/30',
-          accent: '#38bdf8',
+          verseText: 'text-white font-sans font-semibold tracking-normal',
+          badge: 'bg-sky-500/20 text-sky-200 border-sky-400/40',
+          frame: 'border-sky-400/20 bg-navy-950/50',
+          divider: 'from-transparent via-sky-400/60 to-transparent',
         };
       case 'elegant':
         return {
-          wrapper: 'bg-black text-white relative before:absolute before:inset-0 before:bg-[radial-gradient(circle_at_center,rgba(249,147,7,0.08)_0,transparent_75%)]',
-          churchName: 'text-gold-200/70 tracking-widest uppercase font-serif',
-          reference: 'text-gold-400 font-serif font-bold italic',
-          verseText: 'text-amber-50 font-scripture italic leading-relaxed',
-          badge: 'bg-gold-500/15 text-gold-400 border-gold-500/40',
-          accent: '#f99307',
+          wrapper:
+            'bg-black text-white relative before:absolute before:inset-0 before:bg-[radial-gradient(circle_at_center,rgba(249,147,7,0.12)_0,transparent_75%)]',
+          churchName: 'text-amber-100 tracking-widest uppercase font-serif',
+          reference: 'text-gold-400 font-serif font-bold',
+          verseText: 'text-amber-50 font-scripture font-semibold leading-relaxed',
+          badge: 'bg-gold-500/20 text-gold-300 border-gold-500/45',
+          frame: 'border-gold-500/25 bg-neutral-950/70',
+          divider: 'from-transparent via-gold-400/70 to-transparent',
         };
       case 'classic':
       default:
         return {
           wrapper: 'bg-gradient-to-br from-navy-950 via-navy-900 to-navy-950 text-white',
-          churchName: 'text-slate-400 font-display tracking-wider uppercase',
-          reference: 'text-gold-400 font-display font-bold',
-          verseText: 'text-slate-100 font-scripture leading-relaxed',
-          badge: 'bg-gold-500/20 text-gold-300 border-gold-500/30',
-          accent: '#f99307',
+          churchName: 'text-white font-display tracking-wide',
+          reference: 'text-gold-400 font-display font-extrabold',
+          verseText: 'text-white font-scripture font-semibold leading-relaxed',
+          badge: 'bg-gold-500/20 text-gold-300 border-gold-500/40',
+          frame: 'border-gold-500/20 bg-navy-950/45',
+          divider: 'from-transparent via-gold-400/60 to-transparent',
         };
     }
   };
 
   const currentStyles = getTemplateStyles();
-  const churchTitle = scripture?.churchName || user?.churchName || user?.name || 'ScriptureLive Church';
-  const churchLogo = scripture?.logoUrl || user?.logoUrl;
+  const churchTitle =
+    scripture?.churchName || user?.churchName || user?.name || 'Sanctuary Worship';
+  const rawLogo = scripture?.logoUrl || user?.logoUrl || '';
+  const churchLogo = assetUrl(rawLogo);
+
+  useEffect(() => {
+    setLogoFailed(false);
+  }, [churchLogo]);
+
+  const activeTranslationCode = (
+    scripture?.translation ||
+    user?.preferredTranslation ||
+    'KJV'
+  ).toUpperCase();
+  const translationObj = TRANSLATIONS.find((t) => t.code === activeTranslationCode);
+  const translationFullName = translationObj ? translationObj.name : activeTranslationCode;
 
   return (
     <div
       ref={containerRef}
       className={`relative w-full h-full flex flex-col justify-between overflow-hidden select-none transition-colors duration-700 ${
-        previewMode ? 'aspect-video rounded-xl p-4' : 'min-h-screen p-8 md:p-14 lg:p-20'
+        previewMode ? 'aspect-video rounded-xl p-3.5' : 'min-h-screen p-8 md:p-12 lg:p-16'
       } ${currentStyles.wrapper}`}
       style={{
         backgroundColor: activeBranding.backgroundColor || undefined,
         color: activeBranding.textColor || undefined,
       }}
     >
-      {/* Subtle Background Glow Effect */}
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[80vw] h-[80vw] max-w-[700px] max-h-[700px] rounded-full bg-gold-500/5 blur-[120px] pointer-events-none" />
+      {/* Subtle Ambient Sanctuary Light */}
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[75vw] h-[75vw] max-w-[760px] max-h-[760px] rounded-full bg-gold-500/8 blur-[130px] pointer-events-none" />
 
-      {/* Top Bar: Church Identity */}
-      <header className={`relative z-10 flex items-center justify-between ${previewMode ? 'pb-2' : 'pb-6'}`}>
-        <div className="flex items-center gap-3">
-          {churchLogo ? (
+      {/* Top Bar: Church Logo, Church Name & Bible Version */}
+      <header
+        className={`relative z-10 flex items-center justify-between border-b border-white/10 ${
+          previewMode ? 'pb-2' : 'pb-5'
+        }`}
+      >
+        <div className="flex items-center gap-3 md:gap-4 min-w-0">
+          {churchLogo && !logoFailed ? (
             <img
               src={churchLogo}
               alt={churchTitle}
-              className={`${previewMode ? 'w-6 h-6' : 'w-12 h-12 md:w-16 md:h-16'} rounded-full object-contain bg-white/5 p-1 border border-white/10 shadow-lg`}
+              onError={() => setLogoFailed(true)}
+              className={`${
+                previewMode ? 'w-7 h-7 p-0.5' : 'w-14 h-14 md:w-16 md:h-16 p-1.5'
+              } rounded-2xl object-contain bg-white/10 border border-gold-500/40 shadow-xl flex-shrink-0`}
             />
           ) : (
             <div
-              className={`${previewMode ? 'w-6 h-6 text-xs' : 'w-12 h-12 md:w-16 md:h-16 text-lg md:text-xl'} rounded-full bg-white/10 flex items-center justify-center font-bold text-gold-400 border border-white/15 shadow-lg`}
+              className={`${
+                previewMode ? 'w-7 h-7 text-xs' : 'w-14 h-14 md:w-16 md:h-16 text-xl md:text-2xl'
+              } rounded-2xl bg-gradient-to-br from-gold-500/25 to-gold-600/10 flex items-center justify-center font-extrabold text-gold-400 border border-gold-500/40 shadow-xl flex-shrink-0 font-display`}
             >
-              <BookOpen className={previewMode ? 'w-3 h-3' : 'w-6 h-6'} />
+              {(churchTitle || 'C').charAt(0).toUpperCase()}
             </div>
           )}
-          <div>
-            <h2 className={`${previewMode ? 'text-xs' : 'text-base md:text-xl'} font-semibold tracking-wide ${currentStyles.churchName}`}>
+
+          <div className="min-w-0">
+            <h2
+              className={`${
+                previewMode ? 'text-xs' : 'text-lg md:text-2xl'
+              } font-bold tracking-wide truncate ${currentStyles.churchName}`}
+            >
               {churchTitle}
             </h2>
+            {!previewMode && (
+              <p className="text-xs md:text-sm text-gold-400/90 font-semibold tracking-wider uppercase">
+                Holy Bible Projection
+              </p>
+            )}
           </div>
         </div>
 
-        {/* Translation & Live Indicator */}
-        <div className="flex items-center gap-2">
-          {scripture && (
-            <span
-              className={`px-3 py-1 rounded-full border text-xs font-bold tracking-wider uppercase ${currentStyles.badge}`}
-            >
-              {scripture.translation || user?.preferredTranslation || 'KJV'}
+        {/* Bible Version Badge & Fullscreen Toggle */}
+        <div className="flex items-center gap-3 flex-shrink-0">
+          <div
+            className={`rounded-xl border font-bold tracking-wider uppercase flex items-center gap-2 shadow-md ${
+              previewMode ? 'px-2 py-0.5 text-[10px]' : 'px-4 py-2 text-xs md:text-sm'
+            } ${currentStyles.badge}`}
+          >
+            <BookOpen className={previewMode ? 'w-3 h-3' : 'w-4 h-4'} />
+            <span>
+              {previewMode
+                ? activeTranslationCode
+                : `${translationFullName} (${activeTranslationCode})`}
             </span>
-          )}
+          </div>
 
-          {/* Fullscreen Button (hidden in preview mode) */}
           {!previewMode && (
             <button
               onClick={toggleFullscreen}
-              className="p-2.5 rounded-xl bg-white/5 hover:bg-white/15 text-slate-300 hover:text-white border border-white/10 transition-all opacity-40 hover:opacity-100 cursor-pointer"
-              title={isFullscreen ? 'Exit Full Screen' : 'Enter Full Screen'}
+              className="p-2.5 rounded-xl bg-white/5 hover:bg-white/15 text-slate-300 hover:text-white border border-white/10 transition-all opacity-50 hover:opacity-100 cursor-pointer"
+              title={isFullscreen ? 'Exit Full Screen (F)' : 'Enter Full Screen (F)'}
             >
               {isFullscreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
             </button>
@@ -192,85 +246,137 @@ const ProjectionScreen = ({ previewMode = false, overrideScripture = null, overr
         </div>
       </header>
 
-      {/* Center Body: Scripture or Idle Resting Screen */}
-      <main className="relative z-10 flex-1 flex flex-col justify-center items-center text-center px-4 my-auto">
+      {/* Center Body: Stylish Semi-Bold Scripture Presentation */}
+      <main className="relative z-10 flex-1 flex flex-col justify-center items-center text-center px-2 md:px-6 my-auto">
         <AnimatePresence mode="wait">
           {scripture ? (
             <motion.div
-              key={scripture.reference + (scripture.text || '')}
-              initial={{ opacity: 0, y: 30, scale: 0.98 }}
+              key={scripture.reference + (scripture.text || '') + activeTranslationCode}
+              initial={{ opacity: 0, y: 24, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -20, scale: 0.98 }}
-              transition={{ duration: 0.5, ease: 'easeOut' }}
-              className="max-w-5xl mx-auto flex flex-col items-center justify-center"
+              exit={{ opacity: 0, y: -18, scale: 0.98 }}
+              transition={{ duration: 0.35, ease: 'easeOut' }}
+              className={`w-full max-w-6xl mx-auto rounded-3xl border backdrop-blur-sm shadow-2xl flex flex-col items-center justify-center ${
+                previewMode ? 'p-3' : 'p-8 md:p-12 lg:p-14'
+              } ${currentStyles.frame}`}
             >
-              {/* Reference Title (e.g., John 3:16) */}
-              <motion.h1
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, delay: 0.1 }}
-                className={`font-display tracking-tight mb-4 md:mb-6 ${
-                  previewMode ? 'text-base font-bold' : 'text-3xl md:text-5xl lg:text-6xl font-black'
-                } ${currentStyles.reference}`}
-                style={{ color: activeBranding.primaryColor || undefined }}
-              >
-                {scripture.reference}
-              </motion.h1>
+              {/* Reference Header & Version Pill */}
+              <div className="flex flex-wrap items-center justify-center gap-3 mb-2 md:mb-4">
+                <h1
+                  className={`font-display tracking-tight ${
+                    previewMode
+                      ? 'text-base font-extrabold'
+                      : 'text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-extrabold'
+                  } ${currentStyles.reference}`}
+                  style={{ color: activeBranding.primaryColor || undefined }}
+                >
+                  {scripture.reference}
+                </h1>
+                <span
+                  className={`rounded-lg border font-bold uppercase tracking-widest ${
+                    previewMode
+                      ? 'px-1.5 py-0.5 text-[9px]'
+                      : 'px-3 py-1 text-xs md:text-sm'
+                  } ${currentStyles.badge}`}
+                >
+                  {activeTranslationCode}
+                </span>
+              </div>
 
-              {/* Bible Verse Body Text */}
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 0.5, delay: 0.2 }}
-                className={`leading-relaxed max-w-4xl font-normal drop-shadow-md ${
-                  previewMode ? 'text-xs line-clamp-3' : getDynamicFontSize(scripture.text)
+              {/* Ornamental Gold Divider */}
+              <div
+                className={`w-2/3 max-w-md h-[2px] bg-gradient-to-r ${currentStyles.divider} ${
+                  previewMode ? 'my-1.5' : 'my-4 md:my-6'
+                }`}
+              />
+
+              {/* Semi-Bold Scripture Verse Body Text */}
+              <div
+                className={`max-w-5xl font-semibold tracking-wide drop-shadow-sm ${
+                  previewMode
+                    ? 'text-xs line-clamp-3 leading-snug'
+                    : `${getDynamicFontSize(scripture.text)} leading-[1.45]`
                 } ${currentStyles.verseText}`}
               >
-                “{scripture.text || 'For God so loved the world, that he gave his only begotten Son, that whosoever believeth in him should not perish, but have everlasting life.'}”
-              </motion.div>
+                “{scripture.text}”
+              </div>
             </motion.div>
           ) : (
-            // Idle Resting State: Elegant Church Screen
+            // Idle Sanctuary Screen with Church Logo & Name
             <motion.div
               key="idle"
-              initial={{ opacity: 0, scale: 0.95 }}
+              initial={{ opacity: 0, scale: 0.96 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.6 }}
+              exit={{ opacity: 0, scale: 0.96 }}
+              transition={{ duration: 0.5 }}
               className="flex flex-col items-center justify-center text-center p-6"
             >
-              <div className="relative mb-6">
-                <div className="w-24 h-24 md:w-36 md:h-36 rounded-3xl bg-gradient-to-tr from-gold-500/20 via-navy-800 to-gold-500/10 border border-gold-500/30 flex items-center justify-center shadow-2xl animate-pulse-glow">
-                  {churchLogo ? (
-                    <img src={churchLogo} alt={churchTitle} className="w-16 h-16 md:w-24 md:h-24 object-contain" />
+              <div className="relative mb-5">
+                <div
+                  className={`${
+                    previewMode ? 'w-14 h-14 rounded-2xl' : 'w-28 h-28 md:w-36 md:h-36 rounded-3xl'
+                  } bg-gradient-to-tr from-gold-500/20 via-navy-800/80 to-gold-500/10 border-2 border-gold-500/40 flex items-center justify-center shadow-2xl p-3`}
+                >
+                  {churchLogo && !logoFailed ? (
+                    <img
+                      src={churchLogo}
+                      alt={churchTitle}
+                      onError={() => setLogoFailed(true)}
+                      className="max-w-full max-h-full object-contain"
+                    />
                   ) : (
-                    <BookOpen className="w-12 h-12 md:w-16 md:h-16 text-gold-400" />
+                    <BookOpen
+                      className={
+                        previewMode ? 'w-7 h-7 text-gold-400' : 'w-14 h-14 md:w-16 md:h-16 text-gold-400'
+                      }
+                    />
                   )}
                 </div>
               </div>
-              <h2 className={`${previewMode ? 'text-sm' : 'text-2xl md:text-3xl'} font-bold font-display text-white mb-2`}>
+              <h2
+                className={`${
+                  previewMode ? 'text-sm' : 'text-2xl md:text-4xl'
+                } font-extrabold font-display text-white tracking-tight mb-2`}
+              >
                 {churchTitle}
               </h2>
-              <p className={`${previewMode ? 'text-[10px]' : 'text-sm md:text-base'} text-slate-400 max-w-md flex items-center justify-center gap-2`}>
-                <Sparkles className="w-4 h-4 text-gold-400/80" />
-                <span>Scripture projection is active and waiting for reference...</span>
+              <p
+                className={`${
+                  previewMode ? 'text-[10px]' : 'text-sm md:text-base'
+                } text-gold-400/90 font-semibold tracking-widest uppercase`}
+              >
+                {translationFullName} ({activeTranslationCode})
               </p>
             </motion.div>
           )}
         </AnimatePresence>
       </main>
 
-      {/* Bottom Bar: Clean subtle watermark / footer */}
-      <footer className={`relative z-10 flex items-center justify-between text-[11px] opacity-60 ${previewMode ? 'pt-2' : 'pt-6'}`}>
-        <div>
-          {scripture?.reference ? (
-            <span>Displaying Holy Bible • {scripture.translation || 'KJV'}</span>
-          ) : (
-            <span>ScriptureLive AI Live System</span>
+      {/* Bottom Bar: Church Identity & Active Bible Translation */}
+      <footer
+        className={`relative z-10 flex items-center justify-between border-t border-white/10 font-semibold ${
+          previewMode ? 'pt-1.5 text-[9px]' : 'pt-4 text-xs md:text-sm'
+        } opacity-80`}
+      >
+        <div className="flex items-center gap-2 truncate">
+          {churchLogo && !logoFailed && !previewMode && (
+            <img
+              src={churchLogo}
+              alt=""
+              className="w-5 h-5 rounded-full object-contain bg-white/10 p-0.5"
+            />
           )}
+          <span className="truncate">{churchTitle}</span>
         </div>
-        <div>
-          <span>ScriptureLive AI</span>
+
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {scripture?.reference ? (
+            <span className="text-gold-400 font-bold">
+              {scripture.reference} • {translationFullName} ({activeTranslationCode})
+            </span>
+          ) : (
+            <span>Holy Bible • {activeTranslationCode}</span>
+          )}
         </div>
       </footer>
     </div>

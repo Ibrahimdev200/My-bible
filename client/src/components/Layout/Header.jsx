@@ -15,10 +15,10 @@ const Header = () => {
     const path = location.pathname;
     if (path === '/dashboard') return 'Dashboard Overview';
     if (path.startsWith('/dashboard/bible')) return 'Bible Scripture Browser';
-    if (path.startsWith('/dashboard/live')) return 'Live AI Speech Recognition';
-    if (path.startsWith('/dashboard/history')) return 'Scripture Detection Log';
+    if (path.startsWith('/dashboard/live')) return 'Live Voice Scripture Capture';
+    if (path.startsWith('/dashboard/history')) return 'Scripture Projection Log';
     if (path.startsWith('/dashboard/settings')) return 'Church & Projection Settings';
-    return 'ScriptureLive AI';
+    return 'ScriptureLive';
   };
 
   return (

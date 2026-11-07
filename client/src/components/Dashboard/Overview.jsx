@@ -85,7 +85,7 @@ const Overview = () => {
     },
     {
       icon: Mic,
-      label: 'Microphone AI',
+      label: 'Voice Capture',
       value: isMicListening ? 'Listening' : 'Standby',
       subtext: isMicListening ? 'Live speech tracking' : 'Ready to start',
       color: isMicListening ? 'emerald' : 'blue',
@@ -115,15 +115,15 @@ const Overview = () => {
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gold-500/15 border border-gold-500/30 text-gold-400 text-xs font-semibold mb-3">
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Multi-Tenant Live Church Projection</span>
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>Sanctuary Live Church Projection</span>
             </div>
             <h1 className="text-3xl font-extrabold text-white tracking-tight font-display">
               Welcome, {user?.churchName || 'Faith Fellowship'}
             </h1>
             <p className="text-slate-300 text-sm mt-1.5 max-w-xl leading-relaxed">
-              Real-time AI voice recognition instantly detects scripture references from your sermon
-              and displays them on church screens.
+              Real-time voice recognition captures scripture references and spoken verses from your
+              sermon and displays them on your sanctuary screens.
             </p>
           </div>
 

@@ -1,10 +1,13 @@
 import React from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useSocket } from '../../contexts/SocketContext';
 import { TRANSLATIONS } from '../../utils/bibleData';
+import api from '../../utils/api';
 import { Languages } from 'lucide-react';
 
 const TranslationSelector = ({ value, onChange, compact = false }) => {
   const { user, updateTranslation } = useAuth();
+  const { currentScripture, emitScriptureDetected } = useSocket();
   const currentTranslation = value || user?.preferredTranslation || 'KJV';
 
   const handleSelect = async (e) => {
@@ -13,6 +16,22 @@ const TranslationSelector = ({ value, onChange, compact = false }) => {
       onChange(newTrans);
     } else {
       await updateTranslation(newTrans);
+    }
+
+    // If a scripture is currently projected, immediately refresh its text in the newly selected Bible version
+    if (currentScripture?.reference) {
+      try {
+        const res = await api.get(
+          `/bible/reference?ref=${encodeURIComponent(currentScripture.reference)}&translation=${newTrans}`
+        );
+        if (res.data && res.data.text) {
+          emitScriptureDetected({
+            ...currentScripture,
+            text: res.data.text,
+            translation: newTrans,
+          });
+        }
+      } catch (err) {}
     }
   };
 

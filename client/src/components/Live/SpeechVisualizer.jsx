@@ -47,7 +47,7 @@ const SpeechVisualizer = ({ isActive = false, audioLevel = 0 }) => {
 
       <div className="w-full flex items-center justify-between text-[10px] text-slate-500 mt-2 px-1">
         <span>0 dB</span>
-        <span>AI Frequency Band</span>
+        <span>Voice Frequency Band</span>
         <span>+12 dB</span>
       </div>
     </div>

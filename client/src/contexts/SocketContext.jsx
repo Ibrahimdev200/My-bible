@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import { useAuth } from './AuthContext';
-import { API_BASE } from '../utils/config';
+import { API_BASE, assetUrl } from '../utils/config';
 
 const SocketContext = createContext(null);
 
@@ -108,10 +108,11 @@ export const SocketProvider = ({ children }) => {
   const emitScriptureDetected = useCallback((scriptureData) => {
     const payload = {
       ...scriptureData,
+      translation: (scriptureData.translation || user?.preferredTranslation || 'KJV').toUpperCase(),
       timestamp: new Date().toISOString(),
       churchId: user?.id || user?.churchId || 'public',
-      churchName: user?.churchName || user?.name || 'ScriptureLive Church',
-      logoUrl: user?.logoUrl || '',
+      churchName: scriptureData.churchName || user?.churchName || user?.name || 'Sanctuary Worship',
+      logoUrl: assetUrl(scriptureData.logoUrl || user?.logoUrl || ''),
     };
 
     setCurrentScripture(payload);
