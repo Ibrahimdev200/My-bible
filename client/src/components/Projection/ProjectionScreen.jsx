@@ -289,8 +289,8 @@ const ProjectionScreen = ({
               type="button"
               onClick={toggleGlobalListening}
               className={`flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-bold transition-all cursor-pointer shadow-md ${isMicListening
-                  ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-300'
-                  : 'bg-white/10 hover:bg-white/15 border-white/20 text-slate-200'
+                ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-300'
+                : 'bg-white/10 hover:bg-white/15 border-white/20 text-slate-200'
                 }`}
               title={
                 isMicListening
@@ -370,8 +370,8 @@ const ProjectionScreen = ({
               <div className="flex flex-wrap items-center justify-center gap-3 flex-shrink-0">
                 <h1
                   className={`font-display tracking-tight ${previewMode
-                      ? 'text-base font-extrabold'
-                      : 'text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-extrabold'
+                    ? 'text-base font-extrabold'
+                    : 'text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-extrabold'
                     } ${currentStyles.reference}`}
                   style={{ color: activeBranding.primaryColor || undefined }}
                 >
@@ -379,8 +379,8 @@ const ProjectionScreen = ({
                 </h1>
                 <span
                   className={`rounded-lg border font-bold uppercase tracking-widest ${previewMode
-                      ? 'px-1.5 py-0.5 text-[9px]'
-                      : 'px-3 py-1 text-xs md:text-sm'
+                    ? 'px-1.5 py-0.5 text-[9px]'
+                    : 'px-3 py-1 text-xs md:text-sm'
                     } ${currentStyles.badge}`}
                 >
                   {activeTranslationCode}

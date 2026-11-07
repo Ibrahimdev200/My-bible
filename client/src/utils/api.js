@@ -25,24 +25,24 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response && error.response.status === 401) {
-      const url = error.config?.url || '';
-      const isPublicOrSilentRoute =
-        url.includes('/auth/me') ||
-        url.includes('/bible/') ||
-        url.includes('/scripture/history');
+        const url = error.config?.url || '';
+        const isPublicOrSilentRoute =
+          url.includes('/auth/me') ||
+          url.includes('/bible/') ||
+          url.includes('/scripture/history');
 
-      if (
-        !isPublicOrSilentRoute &&
-        !window.location.pathname.includes('/login') &&
-        !window.location.pathname.includes('/register') &&
-        !window.location.pathname.includes('/projection')
-      ) {
-        localStorage.removeItem('token');
-        window.location.href = '/login';
+        if (
+          !isPublicOrSilentRoute &&
+          !window.location.pathname.includes('/login') &&
+          !window.location.pathname.includes('/register') &&
+          !window.location.pathname.includes('/projection')
+        ) {
+          localStorage.removeItem('token');
+          window.location.href = '/login';
+        }
       }
+      return Promise.reject(error);
     }
-    return Promise.reject(error);
-  }
 );
 
 export default api;

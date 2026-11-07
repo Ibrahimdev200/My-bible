@@ -506,145 +506,145 @@ export const SocketProvider = ({ children }) => {
             const res = await api.get(
               `/bible/reference?ref=${encodeURIComponent(voiceCmd.reference)}&translation=${currentTranslation}`
             );
-            verseText = res.data?.text || res.data?.verses || '';
-            if (res.data?.reference) {
-              resolvedRef = res.data.reference;
+              verseText = res.data?.text || res.data?.verses || '';
+              if (res.data?.reference) {
+                resolvedRef = res.data.reference;
+              }
+            } catch (e) {
+              verseText = '';
+            }
+
+            if (!verseText) {
+              verseText = await fetchFallbackVerseText(voiceCmd.reference, currentTranslation);
+            }
+
+            if (verseText) {
+              lastDetectedRef.current = resolvedRef;
+              lastDetectedTime.current = now;
+
+              const newEntry = {
+                id: `${resolvedRef}_${Date.now()}`,
+                reference: resolvedRef,
+                text: verseText,
+                book: voiceCmd.bookName,
+                chapter: voiceCmd.chapter,
+                verse:
+                  voiceCmd.endVerse > voiceCmd.startVerse
+                    ? `${voiceCmd.startVerse}-${voiceCmd.endVerse}`
+                    : voiceCmd.startVerse,
+                translation: currentTranslation,
+                confidence: 0.98,
+                matchedText: text,
+                timestamp: new Date().toISOString(),
+              };
+
+              lastScriptureContextRef.current = newEntry;
+              setSessionDetections((prev) => [newEntry, ...prev]);
+              saveHistory(newEntry, text);
+              emitScriptureDetected(newEntry);
+              toast.success(`Navigated to ${resolvedRef}`, { duration: 2500 });
+            } else if (bypassCooldown) {
+              toast.error(`Verse ${voiceCmd.reference} not found in this chapter.`);
+            }
+            return;
+          }
+      }
+
+        // 2. Check for Full Bible Scripture Reference ("Psalm 1 verse 2", "John 3:16")
+        const candidateText =
+          rollingWindow && rollingWindow.length > text.length ? rollingWindow : text;
+        const detected =
+          detectScripture(text) || (rollingWindow ? detectScripture(rollingWindow) : null);
+
+        if (detected) {
+          if (interimQuoteTimer.current) {
+            clearTimeout(interimQuoteTimer.current);
+            interimQuoteTimer.current = null;
+          }
+
+          const now = Date.now();
+          if (
+            !bypassCooldown &&
+            lastDetectedRef.current === detected.reference &&
+            now - lastDetectedTime.current < 2000
+          ) {
+            return;
+          }
+
+          lastDetectedRef.current = detected.reference;
+          lastDetectedTime.current = now;
+
+          let verseText = '';
+          try {
+            const res = await api.get(
+              `/bible/reference?ref=${encodeURIComponent(detected.reference)}&translation=${currentTranslation}`
+            );
+            if (res.data) {
+              verseText = res.data.text || res.data.verses || '';
             }
           } catch (e) {
             verseText = '';
           }
 
           if (!verseText) {
-            verseText = await fetchFallbackVerseText(voiceCmd.reference, currentTranslation);
+            verseText = await fetchFallbackVerseText(detected.reference, currentTranslation);
           }
 
-          if (verseText) {
-            lastDetectedRef.current = resolvedRef;
-            lastDetectedTime.current = now;
+          if (!verseText) {
+            if (bypassCooldown) {
+              toast.error(`Could not load verse text for ${detected.reference}.`);
+            }
+            return;
+          }
 
-            const newEntry = {
-              id: `${resolvedRef}_${Date.now()}`,
-              reference: resolvedRef,
-              text: verseText,
-              book: voiceCmd.bookName,
-              chapter: voiceCmd.chapter,
-              verse:
-                voiceCmd.endVerse > voiceCmd.startVerse
-                  ? `${voiceCmd.startVerse}-${voiceCmd.endVerse}`
-                  : voiceCmd.startVerse,
-              translation: currentTranslation,
-              confidence: 0.98,
-              matchedText: text,
-              timestamp: new Date().toISOString(),
-            };
+          const newEntry = {
+            id: `${detected.reference}_${Date.now()}`,
+            reference: detected.reference,
+            text: verseText,
+            book: detected.bookName,
+            chapter: detected.chapter,
+            verse:
+              detected.endVerse > detected.startVerse
+                ? `${detected.startVerse}-${detected.endVerse}`
+                : detected.startVerse,
+            translation: currentTranslation,
+            confidence: detected.confidence,
+            matchedText: detected.matchedText,
+            timestamp: new Date().toISOString(),
+          };
 
-            lastScriptureContextRef.current = newEntry;
-            setSessionDetections((prev) => [newEntry, ...prev]);
-            saveHistory(newEntry, text);
+          lastScriptureContextRef.current = newEntry;
+          setSessionDetections((prev) => [newEntry, ...prev]);
+          saveHistory(newEntry, text);
+
+          if (autoProjectRef.current) {
             emitScriptureDetected(newEntry);
-            toast.success(`Navigated to ${resolvedRef}`, { duration: 2500 });
-          } else if (bypassCooldown) {
-            toast.error(`Verse ${voiceCmd.reference} not found in this chapter.`);
-          }
-          return;
-        }
-      }
-
-      // 2. Check for Full Bible Scripture Reference ("Psalm 1 verse 2", "John 3:16")
-      const candidateText =
-        rollingWindow && rollingWindow.length > text.length ? rollingWindow : text;
-      const detected =
-        detectScripture(text) || (rollingWindow ? detectScripture(rollingWindow) : null);
-
-      if (detected) {
-        if (interimQuoteTimer.current) {
-          clearTimeout(interimQuoteTimer.current);
-          interimQuoteTimer.current = null;
-        }
-
-        const now = Date.now();
-        if (
-          !bypassCooldown &&
-          lastDetectedRef.current === detected.reference &&
-          now - lastDetectedTime.current < 2000
-        ) {
-          return;
-        }
-
-        lastDetectedRef.current = detected.reference;
-        lastDetectedTime.current = now;
-
-        let verseText = '';
-        try {
-          const res = await api.get(
-            `/bible/reference?ref=${encodeURIComponent(detected.reference)}&translation=${currentTranslation}`
-          );
-          if (res.data) {
-            verseText = res.data.text || res.data.verses || '';
-          }
-        } catch (e) {
-          verseText = '';
-        }
-
-        if (!verseText) {
-          verseText = await fetchFallbackVerseText(detected.reference, currentTranslation);
-        }
-
-        if (!verseText) {
-          if (bypassCooldown) {
-            toast.error(`Could not load verse text for ${detected.reference}.`);
+            toast.success(`Projected: ${newEntry.reference} (${currentTranslation})`, {
+              duration: 2800,
+            });
+          } else {
+            setPendingScripture(newEntry);
+            toast(`Scripture Ready: ${newEntry.reference}`, { icon: '📖' });
           }
           return;
         }
 
-        const newEntry = {
-          id: `${detected.reference}_${Date.now()}`,
-          reference: detected.reference,
-          text: verseText,
-          book: detected.bookName,
-          chapter: detected.chapter,
-          verse:
-            detected.endVerse > detected.startVerse
-              ? `${detected.startVerse}-${detected.endVerse}`
-              : detected.startVerse,
-          translation: currentTranslation,
-          confidence: detected.confidence,
-          matchedText: detected.matchedText,
-          timestamp: new Date().toISOString(),
-        };
-
-        lastScriptureContextRef.current = newEntry;
-        setSessionDetections((prev) => [newEntry, ...prev]);
-        saveHistory(newEntry, text);
-
-        if (autoProjectRef.current) {
-          emitScriptureDetected(newEntry);
-          toast.success(`Projected: ${newEntry.reference} (${currentTranslation})`, {
-            duration: 2800,
-          });
-        } else {
-          setPendingScripture(newEntry);
-          toast(`Scripture Ready: ${newEntry.reference}`, { icon: '📖' });
+        // 3. Spoken Scripture Quote Detection
+        const wordCount = candidateText.trim().split(/\s+/).length;
+        if (isFinal) {
+          if (interimQuoteTimer.current) {
+            clearTimeout(interimQuoteTimer.current);
+            interimQuoteTimer.current = null;
+          }
+          await runBackendDetection(candidateText, currentTranslation, bypassCooldown);
+        } else if (wordCount >= 5) {
+          if (interimQuoteTimer.current) clearTimeout(interimQuoteTimer.current);
+          interimQuoteTimer.current = setTimeout(() => {
+            runBackendDetection(candidateText, currentTranslation, false);
+          }, 320);
         }
-        return;
-      }
-
-      // 3. Spoken Scripture Quote Detection
-      const wordCount = candidateText.trim().split(/\s+/).length;
-      if (isFinal) {
-        if (interimQuoteTimer.current) {
-          clearTimeout(interimQuoteTimer.current);
-          interimQuoteTimer.current = null;
-        }
-        await runBackendDetection(candidateText, currentTranslation, bypassCooldown);
-      } else if (wordCount >= 5) {
-        if (interimQuoteTimer.current) clearTimeout(interimQuoteTimer.current);
-        interimQuoteTimer.current = setTimeout(() => {
-          runBackendDetection(candidateText, currentTranslation, false);
-        }, 320);
-      }
-    },
-    [emitClearProjection, emitScrollProjection, emitScriptureDetected, runBackendDetection, saveHistory]
+      },
+      [emitClearProjection, emitScrollProjection, emitScriptureDetected, runBackendDetection, saveHistory]
   );
 
   const processVoiceTranscriptRef = useRef(processVoiceTranscript);
@@ -825,25 +825,25 @@ export const SocketProvider = ({ children }) => {
             if (shouldListenRef.current) {
               setTimeout(() => {
                 if (!shouldListenRef.current) return;
-                createAndStartRecognition();
-              }, 150);
-            }
+            createAndStartRecognition();
+          }, 150);
+}
           };
 
-          recognitionRef.current = recognition;
-          try {
-            recognition.start();
-          } catch { }
+recognitionRef.current = recognition;
+try {
+  recognition.start();
+} catch { }
         };
 
-        // Call synchronously inside user click gesture so Chrome/Edge never blocks SpeechRecognition.start()
-        createAndStartRecognition();
-        setupAudioAnalyser();
+// Call synchronously inside user click gesture so Chrome/Edge never blocks SpeechRecognition.start()
+createAndStartRecognition();
+setupAudioAnalyser();
 
-        if (!silentToast) {
-          toast.success('Voice capture active — listening for scriptures & commands');
-        }
-        return true;
+if (!silentToast) {
+  toast.success('Voice capture active — listening for scriptures & commands');
+}
+return true;
       } catch (err) {
   console.error('Failed to start voice capture:', err);
   shouldListenRef.current = false;
@@ -856,13 +856,13 @@ export const SocketProvider = ({ children }) => {
   );
 
 const toggleGlobalListening = useCallback(() => {
-    if (shouldListenRef.current || isMicListening) {
-      stopGlobalListening();
-      toast('Microphone paused');
-    } else {
-      startGlobalListening(false);
-    }
-  }, [isMicListening, startGlobalListening, stopGlobalListening]);
+  if (shouldListenRef.current || isMicListening) {
+    stopGlobalListening();
+    toast('Microphone paused');
+  } else {
+    startGlobalListening(false);
+  }
+}, [isMicListening, startGlobalListening, stopGlobalListening]);
 
 const value = {
   socket,
