@@ -355,39 +355,28 @@ router.get(
     }
   );
 
-  // Biblical speech context phrases to boost recognition accuracy in Google Cloud Speech-to-Text
-  const BIBLE_SPEECH_PHRASES = [
-    'Psalm', 'Psalms', 'Genesis', 'Exodus', 'Leviticus', 'Numbers', 'Deuteronomy',
-    'Joshua', 'Judges', 'Ruth', 'Samuel', 'Kings', 'Chronicles', 'Ezra', 'Nehemiah',
-    'Esther', 'Job', 'Proverbs', 'Ecclesiastes', 'Song of Solomon', 'Isaiah', 'Jeremiah',
-    'Lamentations', 'Ezekiel', 'Daniel', 'Hosea', 'Joel', 'Amos', 'Obadiah', 'Jonah',
-    'Micah', 'Nahum', 'Habakkuk', 'Zephaniah', 'Haggai', 'Zechariah', 'Malachi',
-    'Matthew', 'Mark', 'Luke', 'John', 'Acts', 'Romans', 'Corinthians', 'Galatians',
-    'Ephesians', 'Philippians', 'Colossians', 'Thessalonians', 'Timothy', 'Titus',
-    'Philemon', 'Hebrews', 'James', 'Peter', 'Jude', 'Revelation',
-    'chapter', 'verse', 'go to verse', 'navigate to verse', 'next verse', 'previous verse',
-    'scroll down', 'scroll up', 'close'
-  ];
+  // Biblical context prompt to guide OpenAI Whisper recognition accuracy for books, numbers, and commands
+  const BIBLE_WHISPER_PROMPT =
+    'Bible scripture reference and sanctuary commands: Genesis, Exodus, Leviticus, Numbers, Deuteronomy, Joshua, Judges, Ruth, 1 Samuel, 2 Samuel, 1 Kings, 2 Kings, 1 Chronicles, 2 Chronicles, Ezra, Nehemiah, Esther, Job, Psalms, Psalm 1 verse 2, Proverbs, Ecclesiastes, Song of Solomon, Isaiah, Jeremiah, Lamentations, Ezekiel, Daniel, Hosea, Joel, Amos, Obadiah, Jonah, Micah, Nahum, Habakkuk, Zephaniah, Haggai, Zechariah, Malachi, Matthew, Mark, Luke, John 3:16, Acts, Romans 8:28, 1 Corinthians 13:4, 2 Corinthians, Galatians, Ephesians, Philippians, Colossians, 1 Thessalonians, 2 Thessalonians, 1 Timothy, 2 Timothy, Titus, Philemon, Hebrews, James, 1 Peter, 2 Peter, 1 John, 2 John, 3 John, Jude, Revelation. Commands: go to verse 4, navigate to verse 9, verse 6, next verse, previous verse, scroll down, scroll up, close, clear.';
 
   /**
    * POST /api/bible/speech-to-text
-   * Transcribes an audio chunk via Google Cloud Speech-to-Text v1 API.
-   * Accepts { audioContent (base64), encoding, sampleRateHertz, languageCode, apiKey }
+   * Transcribes an audio chunk via OpenAI Speech-to-Text API (/v1/audio/transcriptions, whisper-1).
+   * Accepts { audioContent (base64), mimeType, language, apiKey }
    */
   router.post('/speech-to-text', authMiddleware.optional, async (req, res) => {
     try {
       const {
         audioContent,
-        encoding = 'WEBM_OPUS',
-        sampleRateHertz = 48000,
-        languageCode = 'en-US',
+        mimeType = 'audio/webm',
+        language = 'en',
         apiKey: clientKey
       } = req.body || {};
 
-      const apiKey = (clientKey || process.env.GOOGLE_SPEECH_API_KEY || '').trim();
+      const apiKey = (clientKey || process.env.OPENAI_API_KEY || '').trim();
       if (!apiKey) {
         return res.status(400).json({
-          error: 'Google Cloud Speech-to-Text API key is not configured. Add GOOGLE_SPEECH_API_KEY on the server or in Live Detection / Settings.'
+          error: 'OpenAI API key is not configured. Add OPENAI_API_KEY on the server or in the Live Capture panel.'
         });
       }
 
@@ -396,53 +385,47 @@ router.get(
       }
 
       const cleanBase64 = audioContent.replace(/^data:audio\/[^;]+;base64,/, '');
+      const audioBuffer = Buffer.from(cleanBase64, 'base64');
 
-      const googleUrl = `https://speech.googleapis.com/v1/speech:recognize?key=${encodeURIComponent(apiKey)}`;
-      const config = {
-        encoding,
-        languageCode,
-        enableAutomaticPunctuation: true,
-        model: 'latest_long',
-        speechContexts: [
-          {
-            phrases: BIBLE_SPEECH_PHRASES,
-            boost: 15
-          }
-        ]
-      };
+      const ext = mimeType.includes('mp4') || mimeType.includes('m4a')
+        ? 'm4a'
+        : mimeType.includes('ogg')
+          ? 'ogg'
+          : mimeType.includes('wav')
+            ? 'wav'
+            : 'webm';
 
-      if (sampleRateHertz && encoding !== 'WEBM_OPUS' && encoding !== 'OGG_OPUS') {
-        config.sampleRateHertz = Number(sampleRateHertz);
-      }
+      const formData = new FormData();
+      const audioBlob = new Blob([audioBuffer], { type: mimeType.split(';')[0] || 'audio/webm' });
+      formData.append('file', audioBlob, `speech.${ext}`);
+      formData.append('model', 'whisper-1');
+      formData.append('language', (language || 'en').slice(0, 2));
+      formData.append('temperature', '0');
+      formData.append('prompt', BIBLE_WHISPER_PROMPT);
 
-      const response = await fetch(googleUrl, {
+      const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          config,
-          audio: { content: cleanBase64 }
-        })
+        headers: {
+          Authorization: `Bearer ${apiKey}`
+        },
+        body: formData
       });
 
       const data = await response.json();
       if (!response.ok) {
-        const errMsg = data?.error?.message || 'Google Cloud Speech-to-Text request failed.';
+        const errMsg = data?.error?.message || 'OpenAI Speech-to-Text request failed.';
         return res.status(response.status).json({ error: errMsg });
       }
 
-      const results = Array.isArray(data.results) ? data.results : [];
-      const transcript = results
-        .map((r) => r.alternatives?.[0]?.transcript || '')
-        .join(' ')
-        .trim();
-      const confidence = results[0]?.alternatives?.[0]?.confidence || 0.95;
+      const transcript = (data.text || '').trim();
 
       return res.status(200).json({
+        provider: 'openai-whisper',
         transcript,
-        confidence
+        confidence: 0.96
       });
     } catch (error) {
-      console.error('Google Cloud Speech-to-Text error:', error);
+      console.error('OpenAI Speech-to-Text error:', error);
       return res.status(500).json({ error: error.message || 'Speech transcription failed.' });
     }
   });

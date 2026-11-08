@@ -47,25 +47,25 @@ const LiveDetection = () => {
     setSessionDetections,
     speechEngine,
     updateSpeechEngine,
-    googleApiKey,
-    saveGoogleApiKey,
-    googleSttStatus,
+    openaiApiKey,
+    saveOpenaiApiKey,
+    openaiSttStatus,
     processVoiceTranscript,
   } = useSocket();
 
   const [manualInput, setManualInput] = useState('');
   const [isAnalyzingManual, setIsAnalyzingManual] = useState(false);
   const [showKeyConfig, setShowKeyConfig] = useState(false);
-  const [keyInput, setKeyInput] = useState(googleApiKey || '');
+  const [keyInput, setKeyInput] = useState(openaiApiKey || '');
 
-  const handleSaveGoogleKey = (e) => {
+  const handleSaveOpenaiKey = (e) => {
     e.preventDefault();
-    saveGoogleApiKey(keyInput);
+    saveOpenaiApiKey(keyInput);
     setShowKeyConfig(false);
     toast.success(
       keyInput.trim()
-        ? 'Google Cloud Speech-to-Text API Key saved'
-        : 'Using Hybrid Google Cloud Speech-to-Text & Browser Voice Engine'
+        ? 'OpenAI Whisper API Key saved'
+        : 'Using Hybrid OpenAI Whisper & Browser Voice Engine'
     );
   };
 
@@ -172,7 +172,7 @@ const LiveDetection = () => {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Column: Microphone & Speech Controls (7 cols) */}
         <div className="lg:col-span-7 space-y-6">
-          {/* Google Cloud Speech-to-Text Engine Bar */}
+          {/* OpenAI Whisper Speech-to-Text Engine Bar */}
           <div className="bg-navy-900 border border-navy-800 rounded-2xl p-4 shadow-xl space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2.5">
@@ -182,17 +182,25 @@ const LiveDetection = () => {
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-bold text-white font-display">
-                      Google Cloud Speech-to-Text Engine
+                      OpenAI Whisper Speech-to-Text Engine
                     </span>
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                    <span
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                        openaiSttStatus === 'error'
+                          ? 'bg-red-500/15 text-red-400 border-red-500/30'
+                          : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                      }`}
+                    >
                       <CheckCircle2 className="w-2.5 h-2.5" />
-                      {googleApiKey || googleSttStatus === 'active'
-                        ? 'Cloud API Active'
-                        : 'Hybrid Active'}
+                      {openaiSttStatus === 'error'
+                        ? 'Check API Key'
+                        : openaiApiKey || openaiSttStatus === 'active'
+                          ? 'OpenAI Whisper Active'
+                          : 'Hybrid Active'}
                     </span>
                   </div>
                   <p className="text-[11px] text-slate-400">
-                    Biblical book & sanctuary command phrase boosting (66 books + verse/scroll commands)
+                    Whisper-1 with Biblical context prompt (all 66 books + verse/scroll commands)
                   </p>
                 </div>
               </div>
@@ -203,35 +211,35 @@ const LiveDetection = () => {
                   onChange={(e) => updateSpeechEngine(e.target.value)}
                   className="bg-navy-950 border border-navy-800 rounded-xl px-2.5 py-1.5 text-xs text-white font-semibold focus:outline-none focus:border-gold-500"
                 >
-                  <option value="google-cloud">Google Cloud Speech-to-Text (Primary)</option>
-                  <option value="hybrid">Google Cloud STT + Browser Hybrid</option>
+                  <option value="openai">OpenAI Whisper (Primary)</option>
+                  <option value="hybrid">OpenAI Whisper + Browser Hybrid</option>
                   <option value="web-speech">Browser Native Speech Only</option>
                 </select>
 
                 <button
                   type="button"
                   onClick={() => {
-                    setKeyInput(googleApiKey || '');
+                    setKeyInput(openaiApiKey || '');
                     setShowKeyConfig((prev) => !prev);
                   }}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-navy-950 hover:bg-navy-800 text-gold-400 border border-navy-800 text-xs font-semibold transition-colors cursor-pointer"
                 >
                   <Key className="w-3.5 h-3.5" />
-                  <span>{googleApiKey ? 'API Key Set' : 'Set API Key'}</span>
+                  <span>{openaiApiKey ? 'API Key Set' : 'Set OpenAI Key'}</span>
                 </button>
               </div>
             </div>
 
             {showKeyConfig && (
               <form
-                onSubmit={handleSaveGoogleKey}
+                onSubmit={handleSaveOpenaiKey}
                 className="pt-3 border-t border-navy-800 flex flex-col sm:flex-row items-stretch sm:items-center gap-2"
               >
                 <input
                   type="password"
                   value={keyInput}
                   onChange={(e) => setKeyInput(e.target.value)}
-                  placeholder="Enter Google Cloud Speech-to-Text API Key (AIzaSy...) or leave blank to use server key"
+                  placeholder="Enter OpenAI API Key (sk-proj-... or sk-...) or leave blank to use server OPENAI_API_KEY"
                   className="flex-1 px-3 py-2 bg-navy-950 border border-navy-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-gold-500"
                 />
                 <button
