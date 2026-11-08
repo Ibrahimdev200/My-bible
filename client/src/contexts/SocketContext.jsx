@@ -7,6 +7,20 @@ import { fetchFallbackVerseText, matchFallbackQuote } from '../utils/bibleData';
 import api from '../utils/api';
 import toast from 'react-hot-toast';
 
+const BIBLE_SPEECH_PHRASES = [
+  'Genesis', 'Exodus', 'Leviticus', 'Numbers', 'Deuteronomy', 'Joshua', 'Judges', 'Ruth',
+  '1 Samuel', '2 Samuel', '1 Kings', '2 Kings', '1 Chronicles', '2 Chronicles', 'Ezra',
+  'Nehemiah', 'Esther', 'Job', 'Psalms', 'Psalm', 'Proverbs', 'Ecclesiastes',
+  'Song of Solomon', 'Isaiah', 'Jeremiah', 'Lamentations', 'Ezekiel', 'Daniel', 'Hosea',
+  'Joel', 'Amos', 'Obadiah', 'Jonah', 'Micah', 'Nahum', 'Habakkuk', 'Zephaniah', 'Haggai',
+  'Zechariah', 'Malachi', 'Matthew', 'Mark', 'Luke', 'John', 'Acts', 'Romans',
+  '1 Corinthians', '2 Corinthians', 'Galatians', 'Ephesians', 'Philippians', 'Colossians',
+  '1 Thessalonians', '2 Thessalonians', '1 Timothy', '2 Timothy', 'Titus', 'Philemon',
+  'Hebrews', 'James', '1 Peter', '2 Peter', '1 John', '2 John', '3 John', 'Jude', 'Revelation',
+  'chapter', 'verse', 'go to verse', 'navigate to verse', 'next verse', 'previous verse',
+  'scroll down', 'scroll up', 'close', 'clear', 'vanish',
+];
+
 const SocketContext = createContext(null);
 
 export const SocketProvider = ({ children }) => {
@@ -31,6 +45,27 @@ export const SocketProvider = ({ children }) => {
   const [sessionDetections, setSessionDetections] = useState([]);
   const [scrollCommand, setScrollCommand] = useState(null);
 
+  // Google Cloud Speech-to-Text configuration & engine state
+  const [speechEngine, setSpeechEngine] = useState(() => {
+    try {
+      return localStorage.getItem('scripturelive_speech_engine') || 'google-cloud';
+    } catch {
+      return 'google-cloud';
+    }
+  });
+  const [googleApiKey, setGoogleApiKey] = useState(() => {
+    try {
+      return (
+        localStorage.getItem('scripturelive_google_stt_key') ||
+        import.meta.env.VITE_GOOGLE_SPEECH_API_KEY ||
+        ''
+      );
+    } catch {
+      return import.meta.env.VITE_GOOGLE_SPEECH_API_KEY || '';
+    }
+  });
+  const [googleSttStatus, setGoogleSttStatus] = useState('ready');
+
   // Unique ID for this browser tab so only ONE tab holds the hardware SpeechRecognition lock at a time
   const tabIdRef = useRef(`tab_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
 
@@ -53,8 +88,13 @@ export const SocketProvider = ({ children }) => {
   const userRef = useRef(user);
   const autoProjectRef = useRef(autoProject);
   const displayDurationRef = useRef(displayDuration);
+  const speechEngineRef = useRef(speechEngine);
+  const googleApiKeyRef = useRef(googleApiKey);
 
   const recognitionRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const recorderCycleTimerRef = useRef(null);
+  const peakChunkLevelRef = useRef(0);
   const shouldListenRef = useRef(false);
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
@@ -67,6 +107,36 @@ export const SocketProvider = ({ children }) => {
   const lastCommandTime = useRef(0);
   const interimQuoteTimer = useRef(null);
   const lastBackendText = useRef('');
+
+  useEffect(() => {
+    speechEngineRef.current = speechEngine;
+  }, [speechEngine]);
+
+  useEffect(() => {
+    googleApiKeyRef.current = googleApiKey;
+  }, [googleApiKey]);
+
+  const updateSpeechEngine = useCallback((engine) => {
+    setSpeechEngine(engine);
+    speechEngineRef.current = engine;
+    try {
+      localStorage.setItem('scripturelive_speech_engine', engine);
+    } catch { }
+  }, []);
+
+  const saveGoogleApiKey = useCallback((key) => {
+    const trimmed = (key || '').trim();
+    setGoogleApiKey(trimmed);
+    googleApiKeyRef.current = trimmed;
+    try {
+      if (trimmed) {
+        localStorage.setItem('scripturelive_google_stt_key', trimmed);
+      } else {
+        localStorage.removeItem('scripturelive_google_stt_key');
+      }
+    } catch { }
+    setGoogleSttStatus(trimmed ? 'ready' : 'hybrid');
+  }, []);
 
   useEffect(() => {
     currentScriptureRef.current = currentScripture;
@@ -671,6 +741,170 @@ export const SocketProvider = ({ children }) => {
     processVoiceTranscriptRef.current = processVoiceTranscript;
   }, [processVoiceTranscript]);
 
+  // Convert recorded audio Blob to base64 string
+  const blobToBase64 = useCallback((blob) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = String(reader.result || '');
+        const idx = result.indexOf(',');
+        resolve(idx >= 0 ? result.slice(idx + 1) : result);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }, []);
+
+  // Transcribe audio chunk via Google Cloud Speech-to-Text API (direct or via backend)
+  const transcribeWithGoogleCloud = useCallback(
+    async (audioBlob, mimeType = 'audio/webm;codecs=opus') => {
+      if (!audioBlob || audioBlob.size < 600) return;
+
+      try {
+        const audioContent = await blobToBase64(audioBlob);
+        if (!audioContent) return;
+
+        const encoding = mimeType.includes('ogg') ? 'OGG_OPUS' : 'WEBM_OPUS';
+        const clientKey = (googleApiKeyRef.current || '').trim();
+        let transcript = '';
+
+        // 1. If a Google Cloud API key is configured on the client, call Google Cloud Speech-to-Text v1 directly
+        if (clientKey) {
+          setGoogleSttStatus('streaming');
+          const googleRes = await fetch(
+            `https://speech.googleapis.com/v1/speech:recognize?key=${encodeURIComponent(clientKey)}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                config: {
+                  encoding,
+                  sampleRateHertz: 48000,
+                  languageCode: 'en-US',
+                  enableAutomaticPunctuation: true,
+                  model: 'latest_long',
+                  speechContexts: [
+                    {
+                      phrases: BIBLE_SPEECH_PHRASES,
+                      boost: 15,
+                    },
+                  ],
+                },
+                audio: { content: audioContent },
+              }),
+            }
+          );
+
+          if (googleRes.ok) {
+            const googleData = await googleRes.json();
+            transcript = (googleData.results || [])
+              .map((r) => r.alternatives?.[0]?.transcript || '')
+              .filter(Boolean)
+              .join(' ')
+              .trim();
+            setGoogleSttStatus('active');
+          } else {
+            setGoogleSttStatus('hybrid');
+          }
+        } else {
+          // 2. Otherwise try the backend /api/bible/speech-to-text endpoint (which uses server GOOGLE_SPEECH_API_KEY if configured)
+          try {
+            const res = await api.post('/bible/speech-to-text', {
+              audioContent,
+              encoding,
+              sampleRateHertz: 48000,
+              languageCode: 'en-US',
+            });
+            if (res.data?.provider === 'google-cloud-stt') {
+              setGoogleSttStatus('active');
+              transcript = (res.data.transcript || '').trim();
+            } else {
+              setGoogleSttStatus('hybrid');
+            }
+          } catch {
+            setGoogleSttStatus('hybrid');
+          }
+        }
+
+        if (transcript && processVoiceTranscriptRef.current) {
+          processVoiceTranscriptRef.current(transcript, true, false, transcript);
+        }
+      } catch (err) {
+        console.warn('Google Cloud STT chunk error:', err);
+      }
+    },
+    [blobToBase64]
+  );
+
+  // Start continuous 2.2-second MediaRecorder cycle for Google Cloud Speech-to-Text
+  const startGoogleCloudRecorderLoop = useCallback(
+    (stream) => {
+      if (typeof window.MediaRecorder === 'undefined' || !stream) return;
+
+      let chosenMime = '';
+      const candidates = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/ogg;codecs=opus',
+      ];
+      for (const mime of candidates) {
+        if (window.MediaRecorder.isTypeSupported && window.MediaRecorder.isTypeSupported(mime)) {
+          chosenMime = mime;
+          break;
+        }
+      }
+
+      const runCycle = () => {
+        if (!shouldListenRef.current || !mediaStreamRef.current) return;
+        if (speechEngineRef.current === 'web-speech') {
+          recorderCycleTimerRef.current = setTimeout(runCycle, 1500);
+          return;
+        }
+
+        try {
+          const chunks = [];
+          peakChunkLevelRef.current = 0;
+          const recorder = chosenMime
+            ? new window.MediaRecorder(stream, { mimeType: chosenMime })
+            : new window.MediaRecorder(stream);
+
+          mediaRecorderRef.current = recorder;
+
+          recorder.ondataavailable = (e) => {
+            if (e.data && e.data.size > 0) {
+              chunks.push(e.data);
+            }
+          };
+
+          recorder.onstop = () => {
+            const hadVoiceActivity = peakChunkLevelRef.current > 3.2;
+            if (chunks.length > 0 && hadVoiceActivity && shouldListenRef.current) {
+              const blob = new Blob(chunks, { type: chosenMime || 'audio/webm' });
+              transcribeWithGoogleCloud(blob, chosenMime || 'audio/webm;codecs=opus');
+            }
+            if (shouldListenRef.current) {
+              recorderCycleTimerRef.current = setTimeout(runCycle, 80);
+            }
+          };
+
+          recorder.start();
+          recorderCycleTimerRef.current = setTimeout(() => {
+            if (recorder.state === 'recording') {
+              try {
+                recorder.stop();
+              } catch { }
+            }
+          }, 2200);
+        } catch (err) {
+          console.warn('MediaRecorder cycle error:', err);
+        }
+      };
+
+      runCycle();
+    },
+    [transcribeWithGoogleCloud]
+  );
+
   // Global Microphone Engine (persists across Dashboard, Bible Browser, AND Projection Screen)
   const setupAudioAnalyser = useCallback(async () => {
     try {
@@ -682,6 +916,9 @@ export const SocketProvider = ({ children }) => {
         },
       });
       mediaStreamRef.current = stream;
+
+      // Launch Google Cloud Speech-to-Text chunk recorder on the microphone stream
+      startGoogleCloudRecorderLoop(stream);
 
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       const audioCtx = new AudioContext();
@@ -703,7 +940,11 @@ export const SocketProvider = ({ children }) => {
         for (let i = 0; i < dataArray.length; i++) {
           sum += dataArray[i];
         }
-        setAudioLevel(sum / dataArray.length);
+        const avg = sum / dataArray.length;
+        if (avg > peakChunkLevelRef.current) {
+          peakChunkLevelRef.current = avg;
+        }
+        setAudioLevel(avg);
         animationFrameRef.current = requestAnimationFrame(updateLevel);
       };
 
@@ -711,7 +952,7 @@ export const SocketProvider = ({ children }) => {
     } catch (err) {
       console.warn('Microphone stream access error:', err);
     }
-  }, []);
+  }, [startGoogleCloudRecorderLoop]);
 
   const stopGlobalListening = useCallback(() => {
     shouldListenRef.current = false;
@@ -723,6 +964,21 @@ export const SocketProvider = ({ children }) => {
         payload: false,
         senderTabId: tabIdRef.current,
       });
+    }
+
+    if (recorderCycleTimerRef.current) {
+      clearTimeout(recorderCycleTimerRef.current);
+      recorderCycleTimerRef.current = null;
+    }
+
+    if (mediaRecorderRef.current) {
+      try {
+        mediaRecorderRef.current.onstop = null;
+        if (mediaRecorderRef.current.state === 'recording') {
+          mediaRecorderRef.current.stop();
+        }
+      } catch { }
+      mediaRecorderRef.current = null;
     }
 
     if (recognitionRef.current) {
@@ -755,7 +1011,7 @@ export const SocketProvider = ({ children }) => {
       const SpeechRecognition =
         window.SpeechRecognition || window.webkitSpeechRecognition;
 
-      if (!SpeechRecognition) {
+      if (!SpeechRecognition && typeof window.MediaRecorder === 'undefined') {
         if (!silentToast) {
           toast.error(
             'Voice recognition is not supported in this browser. Please use Google Chrome, Edge, or Safari.'
@@ -771,7 +1027,7 @@ export const SocketProvider = ({ children }) => {
         broadcastMicStatus(true);
 
         const createAndStartRecognition = () => {
-          if (!shouldListenRef.current) return;
+          if (!shouldListenRef.current || !SpeechRecognition) return;
 
           // Clean up any stale instance in this tab first
           if (recognitionRef.current) {
@@ -844,73 +1100,82 @@ export const SocketProvider = ({ children }) => {
             if (shouldListenRef.current) {
               setTimeout(() => {
                 if (!shouldListenRef.current) return;
-            createAndStartRecognition();
-          }, 150);
-}
+                createAndStartRecognition();
+              }, 150);
+            }
           };
 
-recognitionRef.current = recognition;
-try {
-  recognition.start();
-} catch { }
+          recognitionRef.current = recognition;
+          try {
+            recognition.start();
+          } catch { }
         };
 
-// Call synchronously inside user click gesture so Chrome/Edge never blocks SpeechRecognition.start()
-createAndStartRecognition();
-setupAudioAnalyser();
+        // Call synchronously inside user click gesture so Chrome/Edge never blocks SpeechRecognition.start()
+        if (SpeechRecognition) {
+          createAndStartRecognition();
+        }
+        setupAudioAnalyser();
 
-if (!silentToast) {
-  toast.success('Voice capture active — listening for scriptures & commands');
-}
-return true;
+        if (!silentToast) {
+          toast.success(
+            'Google Cloud Speech-to-Text active — listening for scriptures & commands'
+          );
+        }
+        return true;
       } catch (err) {
-  console.error('Failed to start voice capture:', err);
-  shouldListenRef.current = false;
-  setIsMicListening(false);
-  broadcastMicStatus(false);
-  return false;
-}
+        console.error('Failed to start voice capture:', err);
+        shouldListenRef.current = false;
+        setIsMicListening(false);
+        broadcastMicStatus(false);
+        return false;
+      }
     },
-[broadcastMicStatus, setupAudioAnalyser, stopGlobalListening]
+    [broadcastMicStatus, setupAudioAnalyser, stopGlobalListening]
   );
 
-const toggleGlobalListening = useCallback(() => {
-  if (shouldListenRef.current || isMicListening) {
-    stopGlobalListening();
-    toast('Microphone paused');
-  } else {
-    startGlobalListening(false);
-  }
-}, [isMicListening, startGlobalListening, stopGlobalListening]);
+  const toggleGlobalListening = useCallback(() => {
+    if (shouldListenRef.current || isMicListening) {
+      stopGlobalListening();
+      toast('Microphone paused');
+    } else {
+      startGlobalListening(false);
+    }
+  }, [isMicListening, startGlobalListening, stopGlobalListening]);
 
-const value = {
-  socket,
-  isConnected,
-  currentScripture,
-  setCurrentScripture,
-  emitScriptureDetected,
-  emitClearProjection,
-  emitScrollProjection,
-  emitUpdateBranding,
-  displayDuration,
-  setDisplayDuration,
-  liveTranscript,
-  setLiveTranscript,
-  isMicListening,
-  broadcastMicStatus,
-  audioLevel,
-  autoProject,
-  setAutoProject,
-  pendingScripture,
-  setPendingScripture,
-  sessionDetections,
-  setSessionDetections,
-  scrollCommand,
-  processVoiceTranscript,
-  startGlobalListening,
-  stopGlobalListening,
-  toggleGlobalListening,
-};
+  const value = {
+    socket,
+    isConnected,
+    currentScripture,
+    setCurrentScripture,
+    emitScriptureDetected,
+    emitClearProjection,
+    emitScrollProjection,
+    emitUpdateBranding,
+    displayDuration,
+    setDisplayDuration,
+    liveTranscript,
+    setLiveTranscript,
+    isMicListening,
+    broadcastMicStatus,
+    audioLevel,
+    autoProject,
+    setAutoProject,
+    pendingScripture,
+    setPendingScripture,
+    sessionDetections,
+    setSessionDetections,
+    scrollCommand,
+    speechEngine,
+    updateSpeechEngine,
+    googleApiKey,
+    saveGoogleApiKey,
+    googleSttStatus,
+    processVoiceTranscript,
+    startGlobalListening,
+    stopGlobalListening,
+    toggleGlobalListening,
+  };
 
 return <SocketContext.Provider value={value}>{children}</SocketContext.Provider>;
 };

@@ -355,4 +355,96 @@ router.get(
     }
   );
 
+  // Biblical speech context phrases to boost recognition accuracy in Google Cloud Speech-to-Text
+  const BIBLE_SPEECH_PHRASES = [
+    'Psalm', 'Psalms', 'Genesis', 'Exodus', 'Leviticus', 'Numbers', 'Deuteronomy',
+    'Joshua', 'Judges', 'Ruth', 'Samuel', 'Kings', 'Chronicles', 'Ezra', 'Nehemiah',
+    'Esther', 'Job', 'Proverbs', 'Ecclesiastes', 'Song of Solomon', 'Isaiah', 'Jeremiah',
+    'Lamentations', 'Ezekiel', 'Daniel', 'Hosea', 'Joel', 'Amos', 'Obadiah', 'Jonah',
+    'Micah', 'Nahum', 'Habakkuk', 'Zephaniah', 'Haggai', 'Zechariah', 'Malachi',
+    'Matthew', 'Mark', 'Luke', 'John', 'Acts', 'Romans', 'Corinthians', 'Galatians',
+    'Ephesians', 'Philippians', 'Colossians', 'Thessalonians', 'Timothy', 'Titus',
+    'Philemon', 'Hebrews', 'James', 'Peter', 'Jude', 'Revelation',
+    'chapter', 'verse', 'go to verse', 'navigate to verse', 'next verse', 'previous verse',
+    'scroll down', 'scroll up', 'close'
+  ];
+
+  /**
+   * POST /api/bible/speech-to-text
+   * Transcribes an audio chunk via Google Cloud Speech-to-Text v1 API.
+   * Accepts { audioContent (base64), encoding, sampleRateHertz, languageCode, apiKey }
+   */
+  router.post('/speech-to-text', authMiddleware.optional, async (req, res) => {
+    try {
+      const {
+        audioContent,
+        encoding = 'WEBM_OPUS',
+        sampleRateHertz = 48000,
+        languageCode = 'en-US',
+        apiKey: clientKey
+      } = req.body || {};
+
+      const apiKey = (clientKey || process.env.GOOGLE_SPEECH_API_KEY || '').trim();
+      if (!apiKey) {
+        return res.status(400).json({
+          error: 'Google Cloud Speech-to-Text API key is not configured. Add GOOGLE_SPEECH_API_KEY on the server or in Live Detection / Settings.'
+        });
+      }
+
+      if (!audioContent || typeof audioContent !== 'string') {
+        return res.status(400).json({ error: 'audioContent (base64) is required.' });
+      }
+
+      const cleanBase64 = audioContent.replace(/^data:audio\/[^;]+;base64,/, '');
+
+      const googleUrl = `https://speech.googleapis.com/v1/speech:recognize?key=${encodeURIComponent(apiKey)}`;
+      const config = {
+        encoding,
+        languageCode,
+        enableAutomaticPunctuation: true,
+        model: 'latest_long',
+        speechContexts: [
+          {
+            phrases: BIBLE_SPEECH_PHRASES,
+            boost: 15
+          }
+        ]
+      };
+
+      if (sampleRateHertz && encoding !== 'WEBM_OPUS' && encoding !== 'OGG_OPUS') {
+        config.sampleRateHertz = Number(sampleRateHertz);
+      }
+
+      const response = await fetch(googleUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          config,
+          audio: { content: cleanBase64 }
+        })
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        const errMsg = data?.error?.message || 'Google Cloud Speech-to-Text request failed.';
+        return res.status(response.status).json({ error: errMsg });
+      }
+
+      const results = Array.isArray(data.results) ? data.results : [];
+      const transcript = results
+        .map((r) => r.alternatives?.[0]?.transcript || '')
+        .join(' ')
+        .trim();
+      const confidence = results[0]?.alternatives?.[0]?.confidence || 0.95;
+
+      return res.status(200).json({
+        transcript,
+        confidence
+      });
+    } catch (error) {
+      console.error('Google Cloud Speech-to-Text error:', error);
+      return res.status(500).json({ error: error.message || 'Speech transcription failed.' });
+    }
+  });
+
   module.exports = router;
