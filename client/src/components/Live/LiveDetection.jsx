@@ -11,9 +11,6 @@ import {
   Send,
   XCircle,
   Volume2,
-  Cloud,
-  Key,
-  CheckCircle2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -45,29 +42,11 @@ const LiveDetection = () => {
     setPendingScripture,
     sessionDetections,
     setSessionDetections,
-    speechEngine,
-    updateSpeechEngine,
-    openaiApiKey,
-    saveOpenaiApiKey,
-    openaiSttStatus,
     processVoiceTranscript,
   } = useSocket();
 
   const [manualInput, setManualInput] = useState('');
   const [isAnalyzingManual, setIsAnalyzingManual] = useState(false);
-  const [showKeyConfig, setShowKeyConfig] = useState(false);
-  const [keyInput, setKeyInput] = useState(openaiApiKey || '');
-
-  const handleSaveOpenaiKey = (e) => {
-    e.preventDefault();
-    saveOpenaiApiKey(keyInput);
-    setShowKeyConfig(false);
-    toast.success(
-      keyInput.trim()
-        ? 'OpenAI Whisper API Key saved'
-        : 'Using Hybrid OpenAI Whisper & Browser Voice Engine'
-    );
-  };
 
   // Trigger manual speech or quick reference test
   const handleManualSubmit = async (e) => {
@@ -172,86 +151,6 @@ const LiveDetection = () => {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Column: Microphone & Speech Controls (7 cols) */}
         <div className="lg:col-span-7 space-y-6">
-          {/* OpenAI Whisper Speech-to-Text Engine Bar */}
-          <div className="bg-navy-900 border border-navy-800 rounded-2xl p-4 shadow-xl space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-gold-500/15 border border-gold-500/30 flex items-center justify-center">
-                  <Cloud className="w-4 h-4 text-gold-400" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-white font-display">
-                      OpenAI Whisper Speech-to-Text Engine
-                    </span>
-                    <span
-                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                        openaiSttStatus === 'error'
-                          ? 'bg-red-500/15 text-red-400 border-red-500/30'
-                          : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                      }`}
-                    >
-                      <CheckCircle2 className="w-2.5 h-2.5" />
-                      {openaiSttStatus === 'error'
-                        ? 'Check API Key'
-                        : openaiApiKey || openaiSttStatus === 'active'
-                          ? 'OpenAI Whisper Active'
-                          : 'Hybrid Active'}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-400">
-                    Whisper-1 with Biblical context prompt (all 66 books + verse/scroll commands)
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <select
-                  value={speechEngine}
-                  onChange={(e) => updateSpeechEngine(e.target.value)}
-                  className="bg-navy-950 border border-navy-800 rounded-xl px-2.5 py-1.5 text-xs text-white font-semibold focus:outline-none focus:border-gold-500"
-                >
-                  <option value="openai">OpenAI Whisper (Primary)</option>
-                  <option value="hybrid">OpenAI Whisper + Browser Hybrid</option>
-                  <option value="web-speech">Browser Native Speech Only</option>
-                </select>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setKeyInput(openaiApiKey || '');
-                    setShowKeyConfig((prev) => !prev);
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-navy-950 hover:bg-navy-800 text-gold-400 border border-navy-800 text-xs font-semibold transition-colors cursor-pointer"
-                >
-                  <Key className="w-3.5 h-3.5" />
-                  <span>{openaiApiKey ? 'API Key Set' : 'Set OpenAI Key'}</span>
-                </button>
-              </div>
-            </div>
-
-            {showKeyConfig && (
-              <form
-                onSubmit={handleSaveOpenaiKey}
-                className="pt-3 border-t border-navy-800 flex flex-col sm:flex-row items-stretch sm:items-center gap-2"
-              >
-                <input
-                  type="password"
-                  value={keyInput}
-                  onChange={(e) => setKeyInput(e.target.value)}
-                  placeholder="Enter OpenAI API Key (sk-proj-... or sk-...) or leave blank to use server OPENAI_API_KEY"
-                  className="flex-1 px-3 py-2 bg-navy-950 border border-navy-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-gold-500"
-                />
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-xl bg-gold-500 hover:bg-gold-400 text-navy-950 text-xs font-bold cursor-pointer"
-                >
-                  Save Key
-                </button>
-              </form>
-            )}
-          </div>
-
           {/* Mic Card */}
           <div className="bg-navy-900 border border-navy-800 rounded-2xl p-8 shadow-xl flex flex-col items-center justify-center relative overflow-hidden">
             <MicrophoneControl />

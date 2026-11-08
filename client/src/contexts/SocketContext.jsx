@@ -7,12 +7,6 @@ import { fetchFallbackVerseText, matchFallbackQuote } from '../utils/bibleData';
 import api from '../utils/api';
 import toast from 'react-hot-toast';
 
-const BIBLE_WHISPER_PROMPT =
-  'Bible scripture reference and sanctuary commands: Genesis, Exodus, Leviticus, Numbers, Deuteronomy, Joshua, Judges, Ruth, 1 Samuel, 2 Samuel, 1 Kings, 2 Kings, 1 Chronicles, 2 Chronicles, Ezra, Nehemiah, Esther, Job, Psalms, Psalm 1 verse 2, Proverbs, Ecclesiastes, Song of Solomon, Isaiah, Jeremiah, Lamentations, Ezekiel, Daniel, Hosea, Joel, Amos, Obadiah, Jonah, Micah, Nahum, Habakkuk, Zephaniah, Haggai, Zechariah, Malachi, Matthew, Mark, Luke, John 3:16, Acts, Romans 8:28, 1 Corinthians 13:4, 2 Corinthians, Galatians, Ephesians, Philippians, Colossians, 1 Thessalonians, 2 Thessalonians, 1 Timothy, 2 Timothy, Titus, Philemon, Hebrews, James, 1 Peter, 2 Peter, 1 John, 2 John, 3 John, Jude, Revelation. Commands: go to verse 4, navigate to verse 9, verse 6, next verse, previous verse, scroll down, scroll up, close, clear.';
-
-const WHISPER_HALLUCINATION_REGEX =
-  /^(\s*(thank you\.?|thanks for watching!?|you\.?|bye\.?|subtitles by.*|amara\.org.*|\.+)\s*)$/i;
-
 const SocketContext = createContext(null);
 
 export const SocketProvider = ({ children }) => {
@@ -37,30 +31,6 @@ export const SocketProvider = ({ children }) => {
   const [sessionDetections, setSessionDetections] = useState([]);
   const [scrollCommand, setScrollCommand] = useState(null);
 
-  // OpenAI Whisper Speech-to-Text configuration & engine state
-  const [speechEngine, setSpeechEngine] = useState(() => {
-    try {
-      const saved = localStorage.getItem('scripturelive_speech_engine');
-      return saved === 'web-speech' || saved === 'hybrid' || saved === 'openai'
-        ? saved
-        : 'openai';
-    } catch {
-      return 'openai';
-    }
-  });
-  const [openaiApiKey, setOpenaiApiKey] = useState(() => {
-    try {
-      return (
-        localStorage.getItem('scripturelive_openai_api_key') ||
-        import.meta.env.VITE_OPENAI_API_KEY ||
-        ''
-      );
-    } catch {
-      return import.meta.env.VITE_OPENAI_API_KEY || '';
-    }
-  });
-  const [openaiSttStatus, setOpenaiSttStatus] = useState('ready');
-
   // Unique ID for this browser tab so only ONE tab holds the hardware SpeechRecognition lock at a time
   const tabIdRef = useRef(`tab_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
 
@@ -83,15 +53,8 @@ export const SocketProvider = ({ children }) => {
   const userRef = useRef(user);
   const autoProjectRef = useRef(autoProject);
   const displayDurationRef = useRef(displayDuration);
-  const speechEngineRef = useRef(speechEngine);
-  const openaiApiKeyRef = useRef(openaiApiKey);
 
   const recognitionRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
-  const recorderCycleTimerRef = useRef(null);
-  const currentAudioLevelRef = useRef(0);
-  const peakChunkLevelRef = useRef(0);
-  const lastAuthErrorToastRef = useRef(0);
   const shouldListenRef = useRef(false);
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
@@ -104,36 +67,6 @@ export const SocketProvider = ({ children }) => {
   const lastCommandTime = useRef(0);
   const interimQuoteTimer = useRef(null);
   const lastBackendText = useRef('');
-
-  useEffect(() => {
-    speechEngineRef.current = speechEngine;
-  }, [speechEngine]);
-
-  useEffect(() => {
-    openaiApiKeyRef.current = openaiApiKey;
-  }, [openaiApiKey]);
-
-  const updateSpeechEngine = useCallback((engine) => {
-    setSpeechEngine(engine);
-    speechEngineRef.current = engine;
-    try {
-      localStorage.setItem('scripturelive_speech_engine', engine);
-    } catch { }
-  }, []);
-
-  const saveOpenaiApiKey = useCallback((key) => {
-    const trimmed = (key || '').trim();
-    setOpenaiApiKey(trimmed);
-    openaiApiKeyRef.current = trimmed;
-    try {
-      if (trimmed) {
-        localStorage.setItem('scripturelive_openai_api_key', trimmed);
-      } else {
-        localStorage.removeItem('scripturelive_openai_api_key');
-      }
-    } catch { }
-    setOpenaiSttStatus(trimmed ? 'ready' : 'hybrid');
-  }, []);
 
   useEffect(() => {
     currentScriptureRef.current = currentScripture;
@@ -738,213 +671,6 @@ export const SocketProvider = ({ children }) => {
     processVoiceTranscriptRef.current = processVoiceTranscript;
   }, [processVoiceTranscript]);
 
-  // Convert recorded audio Blob to base64 string
-  const blobToBase64 = useCallback((blob) => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const result = String(reader.result || '');
-        const idx = result.indexOf(',');
-        resolve(idx >= 0 ? result.slice(idx + 1) : result);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  }, []);
-
-  // Transcribe audio chunk via OpenAI Speech-to-Text API (/v1/audio/transcriptions, whisper-1)
-  const transcribeWithOpenAI = useCallback(
-    async (audioBlob, mimeType = 'audio/webm') => {
-      if (!audioBlob || audioBlob.size < 900) return;
-
-      try {
-        const cleanMime = (mimeType || 'audio/webm').split(';')[0] || 'audio/webm';
-        const ext = cleanMime.includes('mp4') || cleanMime.includes('m4a')
-          ? 'm4a'
-          : cleanMime.includes('ogg')
-            ? 'ogg'
-            : cleanMime.includes('wav')
-              ? 'wav'
-              : 'webm';
-
-        const clientKey = (openaiApiKeyRef.current || '').trim();
-        let transcript = '';
-
-        // 1. If an OpenAI API key is configured on the client, call OpenAI /v1/audio/transcriptions directly
-        if (clientKey) {
-          setOpenaiSttStatus('streaming');
-          const formData = new FormData();
-          const audioFile = new File([audioBlob], `speech.${ext}`, { type: cleanMime });
-          formData.append('file', audioFile);
-          formData.append('model', 'whisper-1');
-          formData.append('language', 'en');
-          formData.append('temperature', '0');
-          formData.append('prompt', BIBLE_WHISPER_PROMPT);
-
-          const openaiRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${clientKey}`,
-            },
-            body: formData,
-          });
-
-          if (openaiRes.ok) {
-            const openaiData = await openaiRes.json();
-            transcript = (openaiData.text || '').trim();
-            setOpenaiSttStatus('active');
-          } else {
-            const errData = await openaiRes.json().catch(() => ({}));
-            if (openaiRes.status === 401) {
-              setOpenaiSttStatus('error');
-              const now = Date.now();
-              if (now - lastAuthErrorToastRef.current > 10000) {
-                lastAuthErrorToastRef.current = now;
-                toast.error(
-                  errData?.error?.message || 'Invalid OpenAI API Key. Please check your sk-... key.'
-                );
-              }
-            } else {
-              setOpenaiSttStatus('hybrid');
-            }
-          }
-        } else {
-          // 2. Otherwise try the backend /api/bible/speech-to-text endpoint (which uses server OPENAI_API_KEY if configured)
-          try {
-            const audioContent = await blobToBase64(audioBlob);
-            const res = await api.post('/bible/speech-to-text', {
-              audioContent,
-              mimeType: cleanMime,
-              language: 'en',
-            });
-            if (res.data?.provider === 'openai-whisper') {
-              setOpenaiSttStatus('active');
-              transcript = (res.data.transcript || '').trim();
-            } else {
-              setOpenaiSttStatus('hybrid');
-            }
-          } catch {
-            setOpenaiSttStatus('hybrid');
-          }
-        }
-
-        if (
-          transcript &&
-          !WHISPER_HALLUCINATION_REGEX.test(transcript) &&
-          processVoiceTranscriptRef.current
-        ) {
-          processVoiceTranscriptRef.current(transcript, true, false, transcript);
-        }
-      } catch (err) {
-        console.warn('OpenAI STT chunk error:', err);
-      }
-    },
-    [blobToBase64]
-  );
-
-  // Start smart voice-activity endpointed MediaRecorder loop for OpenAI Whisper Speech-to-Text
-  const startOpenAIRecorderLoop = useCallback(
-    (stream) => {
-      if (typeof window.MediaRecorder === 'undefined' || !stream) return;
-
-      let chosenMime = '';
-      const candidates = [
-        'audio/webm;codecs=opus',
-        'audio/webm',
-        'audio/mp4',
-        'audio/ogg;codecs=opus',
-      ];
-      for (const mime of candidates) {
-        if (window.MediaRecorder.isTypeSupported && window.MediaRecorder.isTypeSupported(mime)) {
-          chosenMime = mime;
-          break;
-        }
-      }
-
-      const runCycle = () => {
-        if (!shouldListenRef.current || !mediaStreamRef.current) return;
-        if (speechEngineRef.current === 'web-speech') {
-          recorderCycleTimerRef.current = setTimeout(runCycle, 1500);
-          return;
-        }
-
-        try {
-          const chunks = [];
-          peakChunkLevelRef.current = 0;
-          let hasSpokenInChunk = false;
-          let lastSpeechAt = Date.now();
-          const chunkStartedAt = Date.now();
-
-          const recorder = chosenMime
-            ? new window.MediaRecorder(stream, { mimeType: chosenMime })
-            : new window.MediaRecorder(stream);
-
-          mediaRecorderRef.current = recorder;
-
-          recorder.ondataavailable = (e) => {
-            if (e.data && e.data.size > 0) {
-              chunks.push(e.data);
-            }
-          };
-
-          recorder.onstop = () => {
-            if (
-              chunks.length > 0 &&
-              hasSpokenInChunk &&
-              peakChunkLevelRef.current > 3.2 &&
-              shouldListenRef.current
-            ) {
-              const blob = new Blob(chunks, { type: chosenMime || 'audio/webm' });
-              transcribeWithOpenAI(blob, chosenMime || 'audio/webm');
-            }
-            if (shouldListenRef.current) {
-              recorderCycleTimerRef.current = setTimeout(runCycle, 60);
-            }
-          };
-
-          recorder.start();
-
-          // Poll audio level every 160ms for natural utterance endpointing
-          const checkEndpoint = () => {
-            if (!shouldListenRef.current || recorder.state !== 'recording') return;
-
-            const now = Date.now();
-            const elapsed = now - chunkStartedAt;
-            const lvl = currentAudioLevelRef.current;
-
-            if (lvl > 3.2) {
-              hasSpokenInChunk = true;
-              lastSpeechAt = now;
-            }
-
-            const silenceDuration = now - lastSpeechAt;
-
-            // Stop & transcribe as soon as speaker pauses for 650ms after speaking, or after 3.6s max utterance length, or reset after 2.4s of pure silence
-            if (
-              (hasSpokenInChunk && silenceDuration >= 650 && elapsed >= 900) ||
-              elapsed >= 3600 ||
-              (!hasSpokenInChunk && elapsed >= 2400)
-            ) {
-              try {
-                recorder.stop();
-              } catch { }
-              return;
-            }
-
-            recorderCycleTimerRef.current = setTimeout(checkEndpoint, 160);
-          };
-
-          recorderCycleTimerRef.current = setTimeout(checkEndpoint, 200);
-        } catch (err) {
-          console.warn('MediaRecorder cycle error:', err);
-        }
-      };
-
-      runCycle();
-    },
-    [transcribeWithOpenAI]
-  );
-
   // Global Microphone Engine (persists across Dashboard, Bible Browser, AND Projection Screen)
   const setupAudioAnalyser = useCallback(async () => {
     try {
@@ -956,9 +682,6 @@ export const SocketProvider = ({ children }) => {
         },
       });
       mediaStreamRef.current = stream;
-
-      // Launch OpenAI Whisper Speech-to-Text chunk recorder on the microphone stream
-      startOpenAIRecorderLoop(stream);
 
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       const audioCtx = new AudioContext();
@@ -980,12 +703,7 @@ export const SocketProvider = ({ children }) => {
         for (let i = 0; i < dataArray.length; i++) {
           sum += dataArray[i];
         }
-        const avg = sum / dataArray.length;
-        currentAudioLevelRef.current = avg;
-        if (avg > peakChunkLevelRef.current) {
-          peakChunkLevelRef.current = avg;
-        }
-        setAudioLevel(avg);
+        setAudioLevel(sum / dataArray.length);
         animationFrameRef.current = requestAnimationFrame(updateLevel);
       };
 
@@ -993,7 +711,7 @@ export const SocketProvider = ({ children }) => {
     } catch (err) {
       console.warn('Microphone stream access error:', err);
     }
-  }, [startOpenAIRecorderLoop]);
+  }, []);
 
   const stopGlobalListening = useCallback(() => {
     shouldListenRef.current = false;
@@ -1005,21 +723,6 @@ export const SocketProvider = ({ children }) => {
         payload: false,
         senderTabId: tabIdRef.current,
       });
-    }
-
-    if (recorderCycleTimerRef.current) {
-      clearTimeout(recorderCycleTimerRef.current);
-      recorderCycleTimerRef.current = null;
-    }
-
-    if (mediaRecorderRef.current) {
-      try {
-        mediaRecorderRef.current.onstop = null;
-        if (mediaRecorderRef.current.state === 'recording') {
-          mediaRecorderRef.current.stop();
-        }
-      } catch { }
-      mediaRecorderRef.current = null;
     }
 
     if (recognitionRef.current) {
@@ -1044,7 +747,6 @@ export const SocketProvider = ({ children }) => {
       audioContextRef.current = null;
     }
 
-    currentAudioLevelRef.current = 0;
     setAudioLevel(0);
   }, [broadcastMicStatus]);
 
@@ -1053,7 +755,7 @@ export const SocketProvider = ({ children }) => {
       const SpeechRecognition =
         window.SpeechRecognition || window.webkitSpeechRecognition;
 
-      if (!SpeechRecognition && typeof window.MediaRecorder === 'undefined') {
+      if (!SpeechRecognition) {
         if (!silentToast) {
           toast.error(
             'Voice recognition is not supported in this browser. Please use Google Chrome, Edge, or Safari.'
@@ -1069,7 +771,7 @@ export const SocketProvider = ({ children }) => {
         broadcastMicStatus(true);
 
         const createAndStartRecognition = () => {
-          if (!shouldListenRef.current || !SpeechRecognition) return;
+          if (!shouldListenRef.current) return;
 
           // Clean up any stale instance in this tab first
           if (recognitionRef.current) {
@@ -1154,15 +856,11 @@ export const SocketProvider = ({ children }) => {
         };
 
         // Call synchronously inside user click gesture so Chrome/Edge never blocks SpeechRecognition.start()
-        if (SpeechRecognition) {
-          createAndStartRecognition();
-        }
+        createAndStartRecognition();
         setupAudioAnalyser();
 
         if (!silentToast) {
-          toast.success(
-            'OpenAI Whisper Speech-to-Text active — listening for scriptures & commands'
-          );
+          toast.success('Voice capture active — listening for scriptures & commands');
         }
         return true;
       } catch (err) {
@@ -1208,11 +906,6 @@ export const SocketProvider = ({ children }) => {
     sessionDetections,
     setSessionDetections,
     scrollCommand,
-    speechEngine,
-    updateSpeechEngine,
-    openaiApiKey,
-    saveOpenaiApiKey,
-    openaiSttStatus,
     processVoiceTranscript,
     startGlobalListening,
     stopGlobalListening,
