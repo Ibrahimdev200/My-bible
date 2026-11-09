@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Maximize2, BookOpen } from 'lucide-react';
 import api from '../../utils/api';
 import { assetUrl } from '../../utils/config';
+import { TRANSLATIONS } from '../../utils/bibleData';
 
 const ProjectionScreen = ({
   previewMode = false,
@@ -206,9 +207,30 @@ const ProjectionScreen = ({
   };
 
   const currentStyles = getTemplateStyles();
+
+  const localSavedChurch = (() => {
+    try {
+      const raw = localStorage.getItem('scripturelive_local_church');
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  })();
+
   const churchTitle =
-    scripture?.churchName || user?.churchName || user?.name || 'Sanctuary Worship';
-  const rawLogo = scripture?.logoUrl || user?.logoUrl || '';
+    scripture?.churchName ||
+    user?.churchName ||
+    user?.name ||
+    localSavedChurch?.churchName ||
+    localSavedChurch?.name ||
+    'Sanctuary Worship';
+
+  const rawLogo =
+    scripture?.logoUrl ||
+    user?.logoUrl ||
+    localSavedChurch?.logoUrl ||
+    localSavedChurch?.logoPath ||
+    '';
   const churchLogo = assetUrl(rawLogo);
 
   useEffect(() => {
@@ -218,8 +240,11 @@ const ProjectionScreen = ({
   const activeTranslationCode = (
     scripture?.translation ||
     user?.preferredTranslation ||
+    localSavedChurch?.preferredTranslation ||
     'KJV'
   ).toUpperCase();
+  const translationObj = TRANSLATIONS.find((t) => t.code === activeTranslationCode);
+  const translationFullName = translationObj ? translationObj.name : activeTranslationCode;
 
   return (
     <div
@@ -245,47 +270,74 @@ const ProjectionScreen = ({
       {/* Subtle Ambient Sanctuary Light */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[75vw] h-[75vw] max-w-[760px] max-h-[760px] rounded-full bg-gold-500/8 blur-[130px] pointer-events-none" />
 
-      {/* Top Bar: ONLY the Church Logo (plus discreet Full Screen button before entering full screen) */}
+      {/* Top Header: Church Logo, Church Name, and Bible Version Badge */}
       <header
-        className={`relative z-10 flex items-center justify-between ${
-          previewMode ? 'pb-1.5' : 'pb-3'
+        className={`relative z-10 flex items-center justify-between border-b border-white/10 ${
+          previewMode ? 'pb-1.5' : 'pb-3 md:pb-4'
         }`}
       >
-        <div className="flex items-center">
+        {/* Church Identity: Logo + Full Church Name */}
+        <div className="flex items-center gap-3 md:gap-4 min-w-0">
           {churchLogo && !logoFailed ? (
             <img
               src={churchLogo}
               alt={churchTitle}
               onError={() => setLogoFailed(true)}
               className={`${
-                previewMode ? 'w-8 h-8 p-0.5' : 'w-14 h-14 md:w-16 md:h-16 p-1.5'
+                previewMode ? 'w-8 h-8 p-0.5' : 'w-12 h-12 md:w-16 md:h-16 p-1.5'
               } rounded-2xl object-contain bg-white/10 border border-gold-500/40 shadow-xl flex-shrink-0`}
             />
           ) : (
             <div
               className={`${
-                previewMode ? 'w-8 h-8 text-xs' : 'w-14 h-14 md:w-16 md:h-16 text-xl md:text-2xl'
+                previewMode ? 'w-8 h-8 text-xs' : 'w-12 h-12 md:w-16 md:h-16 text-xl md:text-2xl'
               } rounded-2xl bg-gradient-to-br from-gold-500/25 to-gold-600/10 flex items-center justify-center font-extrabold text-gold-400 border border-gold-500/40 shadow-xl flex-shrink-0 font-display`}
             >
               {(churchTitle || 'C').charAt(0).toUpperCase()}
             </div>
           )}
+
+          <div className="min-w-0">
+            <h2
+              className={`${
+                previewMode ? 'text-xs' : 'text-lg md:text-2xl font-display'
+              } font-bold tracking-wide truncate ${currentStyles.churchName}`}
+            >
+              {churchTitle}
+            </h2>
+            {!previewMode && (
+              <p className="text-[11px] md:text-xs text-gold-400/90 font-semibold tracking-wider uppercase">
+                Holy Bible Sanctuary Projection
+              </p>
+            )}
+          </div>
         </div>
 
-        {/* Discreet Enter Full Screen trigger only when NOT yet in Full Screen */}
-        {!previewMode && !isFullscreen && (
-          <button
-            type="button"
-            onClick={toggleFullscreen}
-            className="p-2 rounded-xl bg-white/5 hover:bg-white/15 text-slate-300 hover:text-white border border-white/10 transition-all opacity-40 hover:opacity-100 cursor-pointer"
-            title="Enter Full Screen (F)"
+        {/* Right Header: Bible Version Badge & Discreet Fullscreen Toggle */}
+        <div className="flex items-center gap-2.5 flex-shrink-0">
+          <div
+            className={`rounded-xl border font-bold tracking-wider uppercase flex items-center gap-1.5 shadow-md ${
+              previewMode ? 'px-2 py-0.5 text-[10px]' : 'px-3.5 py-1.5 text-xs md:text-sm'
+            } ${currentStyles.badge}`}
           >
-            <Maximize2 className="w-5 h-5" />
-          </button>
-        )}
+            <BookOpen className={previewMode ? 'w-3 h-3' : 'w-4 h-4 text-gold-400'} />
+            <span>{translationFullName} ({activeTranslationCode})</span>
+          </div>
+
+          {!previewMode && (
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              className="p-2 rounded-xl bg-white/5 hover:bg-white/15 text-slate-300 hover:text-white border border-white/10 transition-all opacity-40 hover:opacity-100 cursor-pointer"
+              title={isFullscreen ? 'Exit Full Screen (F)' : 'Enter Full Screen (F)'}
+            >
+              <Maximize2 className="w-5 h-5" />
+            </button>
+          )}
+        </div>
       </header>
 
-      {/* Center Body: ONLY the Bible Chapter/Scripture with Scrollbar (or Church Logo when idle) */}
+      {/* Center Body: Scripture Presentation with Scrollbar (or Church Logo & Name when idle) */}
       <main className="relative z-10 flex-1 min-h-0 flex flex-col justify-center items-center text-center px-2 md:px-6 my-2 overflow-hidden">
         <AnimatePresence mode="wait">
           {scripture ? (
@@ -299,8 +351,8 @@ const ProjectionScreen = ({
                 previewMode ? 'p-3' : 'p-6 md:p-10 lg:p-12'
               } ${currentStyles.frame}`}
             >
-              {/* Bible Chapter / Verse Heading */}
-              <div className="flex items-center justify-center flex-shrink-0">
+              {/* Reference Header & Version Pill */}
+              <div className="flex flex-wrap items-center justify-center gap-3 flex-shrink-0">
                 <h1
                   className={`font-display tracking-tight ${
                     previewMode
@@ -311,6 +363,15 @@ const ProjectionScreen = ({
                 >
                   {scripture.reference}
                 </h1>
+                <span
+                  className={`rounded-lg border font-bold uppercase tracking-widest ${
+                    previewMode
+                      ? 'px-1.5 py-0.5 text-[9px]'
+                      : 'px-3 py-1 text-xs md:text-sm'
+                  } ${currentStyles.badge}`}
+                >
+                  {activeTranslationCode}
+                </span>
               </div>
 
               {/* Ornamental Gold Divider */}
@@ -324,7 +385,7 @@ const ProjectionScreen = ({
               <div
                 ref={verseScrollRef}
                 className={`w-full flex-1 min-h-0 overflow-y-auto projector-scroll px-2 md:px-6 ${
-                  previewMode ? 'max-h-28' : 'max-h-[68vh]'
+                  previewMode ? 'max-h-28' : 'max-h-[64vh]'
                 }`}
               >
                 <div
@@ -339,7 +400,7 @@ const ProjectionScreen = ({
               </div>
             </motion.div>
           ) : (
-            // Idle Screen: ONLY the Church Logo
+            // Idle Screen: Church Logo, Church Name & Bible Version
             <motion.div
               key="idle"
               initial={{ opacity: 0, scale: 0.96 }}
@@ -352,8 +413,8 @@ const ProjectionScreen = ({
                 className={`${
                   previewMode
                     ? 'w-16 h-16 rounded-2xl'
-                    : 'w-36 h-36 md:w-44 md:h-44 rounded-3xl'
-                } bg-gradient-to-tr from-gold-500/20 via-navy-800/80 to-gold-500/10 border-2 border-gold-500/40 flex items-center justify-center shadow-2xl p-4`}
+                    : 'w-32 h-32 md:w-40 md:h-40 rounded-3xl'
+                } bg-gradient-to-tr from-gold-500/20 via-navy-800/80 to-gold-500/10 border-2 border-gold-500/40 flex items-center justify-center shadow-2xl p-4 mb-4`}
               >
                 {churchLogo && !logoFailed ? (
                   <img
@@ -372,10 +433,52 @@ const ProjectionScreen = ({
                   />
                 )}
               </div>
+              <h2
+                className={`${
+                  previewMode ? 'text-sm' : 'text-2xl md:text-4xl'
+                } font-extrabold font-display text-white tracking-tight mb-2`}
+              >
+                {churchTitle}
+              </h2>
+              <p
+                className={`${
+                  previewMode ? 'text-[10px]' : 'text-sm md:text-base'
+                } text-gold-400/90 font-semibold tracking-widest uppercase`}
+              >
+                {translationFullName} ({activeTranslationCode})
+              </p>
             </motion.div>
           )}
         </AnimatePresence>
       </main>
+
+      {/* Bottom Bar: Church Identity & Active Bible Translation */}
+      <footer
+        className={`relative z-10 flex items-center justify-between gap-4 border-t border-white/10 font-semibold ${
+          previewMode ? 'pt-1.5 text-[9px]' : 'pt-3 text-xs md:text-sm'
+        } opacity-85`}
+      >
+        <div className="flex items-center gap-2 truncate">
+          {churchLogo && !logoFailed && (
+            <img
+              src={churchLogo}
+              alt=""
+              className="w-5 h-5 rounded-full object-contain bg-white/10 p-0.5"
+            />
+          )}
+          <span className="truncate">{churchTitle}</span>
+        </div>
+
+        <div className="flex items-center gap-2 flex-shrink-0 text-gold-400 font-bold">
+          {scripture?.reference ? (
+            <span>
+              {scripture.reference} • {translationFullName} ({activeTranslationCode})
+            </span>
+          ) : (
+            <span>Holy Bible • {translationFullName} ({activeTranslationCode})</span>
+          )}
+        </div>
+      </footer>
     </div>
   );
 };

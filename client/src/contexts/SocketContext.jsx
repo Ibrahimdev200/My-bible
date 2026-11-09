@@ -228,7 +228,15 @@ export const SocketProvider = ({ children }) => {
   // Emit scripture detected to projection
   const emitScriptureDetected = useCallback(
     (scriptureData) => {
-      const activeUser = userRef.current;
+      const savedChurch = (() => {
+        try {
+          const raw = localStorage.getItem('scripturelive_local_church');
+          return raw ? JSON.parse(raw) : null;
+        } catch {
+          return null;
+        }
+      })();
+      const activeUser = userRef.current || savedChurch;
       const parsedCtx = parseReferenceContext(scriptureData);
 
       const payload = {
@@ -246,6 +254,7 @@ export const SocketProvider = ({ children }) => {
         translation: (
           scriptureData.translation ||
           activeUser?.preferredTranslation ||
+          savedChurch?.preferredTranslation ||
           'KJV'
         ).toUpperCase(),
         timestamp: new Date().toISOString(),
@@ -254,8 +263,16 @@ export const SocketProvider = ({ children }) => {
           scriptureData.churchName ||
           activeUser?.churchName ||
           activeUser?.name ||
+          savedChurch?.churchName ||
+          savedChurch?.name ||
           'Sanctuary Worship',
-        logoUrl: assetUrl(scriptureData.logoUrl || activeUser?.logoUrl || ''),
+        logoUrl: assetUrl(
+          scriptureData.logoUrl ||
+          activeUser?.logoUrl ||
+          savedChurch?.logoUrl ||
+          savedChurch?.logoPath ||
+          ''
+        ),
       };
 
       setCurrentScripture(payload);
