@@ -28,47 +28,29 @@ const BookList = ({ selectedBook, onSelectBook, activeTestament = 'ALL' }) => {
         />
       </div>
 
-      {/* Book Grid */}
-      <div className="flex-1 overflow-y-auto pr-1 grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[600px]">
+      {/* Clean Full-Name Passage / Book List (Single Column, Full Spelling, Easy Access) */}
+      <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-1.5 max-h-[600px]">
         {filteredBooks.map((book) => {
           const isSelected = selectedBook?.id === book.id;
           return (
             <button
               key={book.id}
               onClick={() => onSelectBook(book)}
-              className={`p-3 rounded-xl border text-left transition-all flex items-center justify-between cursor-pointer group ${
+              className={`w-full px-3.5 py-2.5 rounded-xl border text-left transition-all flex items-center cursor-pointer ${
                 isSelected
                   ? 'bg-gold-500 text-navy-950 border-gold-500 font-bold shadow-md shadow-gold-500/20'
-                  : 'bg-navy-900 hover:bg-navy-800 text-slate-200 border-navy-800 hover:border-navy-700'
+                  : 'bg-navy-950/60 hover:bg-navy-800 text-slate-100 border-navy-800 hover:border-gold-500/40 font-semibold'
               }`}
             >
-              <div className="min-w-0 pr-2">
-                <p className="text-xs truncate font-display font-medium">
-                  {book.name}
-                </p>
-                <span
-                  className={`text-[10px] ${
-                    isSelected ? 'text-navy-900/80' : 'text-slate-400'
-                  }`}
-                >
-                  {book.chapters} {book.chapters === 1 ? 'Chapter' : 'Chapters'}
-                </span>
-              </div>
-              <span
-                className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${
-                  isSelected
-                    ? 'bg-navy-950/20 text-navy-950'
-                    : 'bg-navy-950 text-slate-400'
-                }`}
-              >
-                {book.testament}
+              <span className="text-sm font-display tracking-wide break-words">
+                {book.name}
               </span>
             </button>
           );
         })}
 
         {filteredBooks.length === 0 && (
-          <div className="col-span-2 text-center py-8 text-xs text-slate-400">
+          <div className="text-center py-8 text-xs text-slate-400">
             No matching books found.
           </div>
         )}
