@@ -55,7 +55,8 @@ router.put(
   '/profile',
   authMiddleware,
   [
-    body('name').optional().trim().notEmpty().withMessage('Church name cannot be empty'),
+    body('name').optional().trim(),
+    body('churchName').optional().trim(),
     body('pastorName').optional().trim(),
     body('phone').optional().trim(),
     body('country').optional().trim(),
@@ -72,8 +73,10 @@ router.put(
       const { name, churchName, pastorName, phone, country, state, address } = req.body;
       const church = req.church;
 
-      const resolvedName = name !== undefined ? name : churchName;
-      if (resolvedName !== undefined && resolvedName.trim()) church.name = resolvedName.trim();
+      const candidateName = churchName !== undefined && churchName !== '' ? churchName : name;
+      if (candidateName !== undefined && candidateName.trim()) {
+        church.name = candidateName.trim();
+      }
       if (pastorName !== undefined) church.pastorName = pastorName;
       if (phone !== undefined) church.phone = phone;
       if (country !== undefined) church.country = country;
@@ -82,9 +85,12 @@ router.put(
 
       await church.save();
 
+      const churchData = church.toJSON();
+      churchData.churchName = church.name;
+
       return res.status(200).json({
         message: 'Church profile updated successfully',
-        church: church.toJSON()
+        church: churchData
       });
     } catch (error) {
       console.error('Update church profile error:', error);

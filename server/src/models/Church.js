@@ -21,6 +21,7 @@ class Church extends Model {
     const values = { ...this.get() };
     delete values.passwordHash;
     delete values.password;
+    values.churchName = values.name;
     return values;
   }
 }

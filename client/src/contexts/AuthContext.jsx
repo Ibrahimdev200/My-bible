@@ -38,7 +38,9 @@ const normalizeUser = (data) => {
   const u = data?.church || data?.user || data;
   if (!u || typeof u !== 'object') return null;
   const logo = u.logoUrl || u.logoPath;
-  const resolvedName = u.churchName || u.name || 'Faith Fellowship';
+  const rawChurchName = u.churchName !== undefined ? String(u.churchName).trim() : '';
+  const rawName = u.name !== undefined ? String(u.name).trim() : '';
+  const resolvedName = rawChurchName || rawName || 'Faith Fellowship';
   return {
     ...u,
     id: u.id || 'local_church',
@@ -298,28 +300,70 @@ export const AuthProvider = ({ children }) => {
 
   // Update Church Profile
   const updateProfile = async (profileData) => {
+    const rawName = (profileData.churchName || profileData.name || '').trim();
+    const payload = {
+      ...profileData,
+      name: rawName || profileData.name,
+      churchName: rawName || profileData.churchName,
+    };
+
+    const storedToken = localStorage.getItem('token');
+    const isLocalSession = !storedToken || storedToken.startsWith('local_token_');
+
+    if (isLocalSession) {
+      const current = userRef.current || {};
+      const merged = normalizeUser({
+        ...current,
+        ...payload,
+        name: rawName || current.name,
+        churchName: rawName || current.churchName,
+      });
+      if (payload.logoUrl !== undefined) {
+        merged.logoUrl = payload.logoUrl;
+      }
+      persistActiveUser(merged);
+
+      // Keep offline accounts in sync
+      const accounts = loadOfflineAccounts().map((acc) =>
+        acc.id === merged.id || (acc.email && acc.email === merged.email)
+          ? { ...acc, ...merged }
+          : acc
+      );
+      saveOfflineAccounts(accounts);
+
+      toast.success('Church profile updated successfully');
+      return { success: true, user: merged };
+    }
+
     try {
-      const res = await api.put('/church/profile', profileData);
+      const res = await api.put('/church/profile', payload);
       const updatedUser = normalizeUser(
-        res.data.church || res.data.user ? res.data : { ...(userRef.current || {}), ...profileData }
+        res.data?.church || res.data?.user ? res.data : { ...(userRef.current || {}), ...payload }
       );
       const current = userRef.current || {};
       const merged = {
         ...current,
         ...updatedUser,
-        churchName: profileData.churchName || profileData.name || updatedUser?.churchName || current.churchName,
-        name: profileData.churchName || profileData.name || updatedUser?.name || current.name,
-        logoUrl: profileData.logoUrl !== undefined ? profileData.logoUrl : (updatedUser?.logoUrl || current.logoUrl),
+        churchName: rawName || updatedUser?.churchName || current.churchName,
+        name: rawName || updatedUser?.name || current.name,
+        logoUrl: payload.logoUrl !== undefined ? payload.logoUrl : (updatedUser?.logoUrl || current.logoUrl),
       };
       persistActiveUser(merged);
+      toast.success('Church profile updated successfully');
       return { success: true, user: merged };
     } catch (error) {
       const current = userRef.current || {};
-      const merged = normalizeUser({ ...current, ...profileData });
-      if (profileData.logoUrl !== undefined) {
-        merged.logoUrl = profileData.logoUrl;
+      const merged = normalizeUser({
+        ...current,
+        ...payload,
+        name: rawName || current.name,
+        churchName: rawName || current.churchName,
+      });
+      if (payload.logoUrl !== undefined) {
+        merged.logoUrl = payload.logoUrl;
       }
       persistActiveUser(merged);
+      toast.success('Church profile saved');
       return { success: true, user: merged };
     }
   };

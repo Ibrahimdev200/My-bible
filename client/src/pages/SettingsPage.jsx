@@ -30,6 +30,7 @@ const SettingsPage = () => {
 
   // Church Profile State
   const [profile, setProfile] = useState({
+    name: user?.churchName || user?.name || '',
     churchName: user?.churchName || user?.name || '',
     pastorName: user?.pastorName || '',
     phone: user?.phone || '',
@@ -60,14 +61,17 @@ const SettingsPage = () => {
   // Sync when user context updates
   useEffect(() => {
     if (user) {
-      setProfile({
-        churchName: user.churchName || user.name || '',
+      const activeName = user.churchName || user.name || '';
+      setProfile((prev) => ({
+        ...prev,
+        churchName: activeName,
+        name: activeName,
         pastorName: user.pastorName || '',
         phone: user.phone || '',
         country: user.country || 'United States',
         state: user.state || '',
         address: user.address || '',
-      });
+      }));
       if (user.branding) {
         setBranding((prev) => ({ ...prev, ...user.branding }));
       }
@@ -82,7 +86,11 @@ const SettingsPage = () => {
 
   const handleProfileChange = (e) => {
     const { name, value } = e.target;
-    setProfile((prev) => ({ ...prev, [name]: value }));
+    if (name === 'churchName') {
+      setProfile((prev) => ({ ...prev, churchName: value, name: value }));
+    } else {
+      setProfile((prev) => ({ ...prev, [name]: value }));
+    }
   };
 
   const handleBrandingChange = (key, value) => {
@@ -115,9 +123,12 @@ const SettingsPage = () => {
         }
       }
 
-      // 2. Update church profile with latest logo
+      // 2. Update church profile with latest logo and synchronized church name
+      const resolvedName = (profile.churchName || profile.name || '').trim();
       const updatedProfile = {
         ...profile,
+        name: resolvedName,
+        churchName: resolvedName,
         logoUrl: currentLogoUrl,
       };
       await updateProfile(updatedProfile);
@@ -133,6 +144,8 @@ const SettingsPage = () => {
       // 5. Broadcast to all open tabs, windows, and socket room immediately
       const fullSettings = {
         ...updatedProfile,
+        name: resolvedName,
+        churchName: resolvedName,
         branding,
         preferredTranslation,
         logoUrl: currentLogoUrl,
@@ -158,7 +171,7 @@ const SettingsPage = () => {
     reference: 'John 3:16',
     text: 'For God so loved the world, that he gave his only begotten Son, that whosoever believeth in him should not perish, but have everlasting life.',
     translation: preferredTranslation || 'KJV',
-    churchName: profile.churchName || user?.churchName || 'Faith Church',
+    churchName: profile.churchName || profile.name || user?.churchName || 'Faith Church',
     logoUrl: logoPreview,
   };
 
@@ -227,6 +240,34 @@ const SettingsPage = () => {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
             {/* Left Col: Customization Form (7 cols) */}
             <div className="lg:col-span-7 space-y-6">
+              {/* Church Quick Identity Card */}
+              <div className="bg-navy-900 border border-navy-800 rounded-2xl p-6 shadow-xl">
+                <div className="flex items-center justify-between mb-1.5">
+                  <h3 className="text-sm font-bold text-white font-display flex items-center gap-2">
+                    <Church className="w-4 h-4 text-gold-400" />
+                    <span>Church Name & Sanctuary Title</span>
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('profile')}
+                    className="text-xs text-gold-400 hover:text-gold-300 font-semibold cursor-pointer underline"
+                  >
+                    Edit Full Profile
+                  </button>
+                </div>
+                <p className="text-xs text-slate-400 mb-3">
+                  This church name is displayed prominently on live projector screens, headers, and idle displays.
+                </p>
+                <input
+                  type="text"
+                  name="churchName"
+                  value={profile.churchName}
+                  onChange={handleProfileChange}
+                  placeholder="e.g. Grace Fellowship Church"
+                  className="w-full px-4 py-2.5 bg-navy-950/90 border border-navy-700 rounded-xl text-white text-xs font-semibold focus:outline-none focus:border-gold-500"
+                />
+              </div>
+
               {/* Template Style Selector */}
               <div className="bg-navy-900 border border-navy-800 rounded-2xl p-6 shadow-xl">
                 <h3 className="text-sm font-bold text-white font-display mb-1 flex items-center gap-2">
