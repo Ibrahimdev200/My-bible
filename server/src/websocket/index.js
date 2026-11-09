@@ -150,6 +150,7 @@ function initSocket(httpServer) {
 
         io.to(churchId).emit('update-branding', {
           branding: data.branding,
+          church: data.church,
           timestamp: new Date().toISOString()
         });
         console.log(`[Socket.IO] Branding update broadcasted for church ${churchId}`);

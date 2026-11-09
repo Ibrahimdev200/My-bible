@@ -155,6 +155,24 @@ export const SocketProvider = ({ children }) => {
               audioContextRef.current = null;
             }
           }
+        } else if (type === 'CHURCH_SETTINGS_UPDATED') {
+          const settings = payload || {};
+          if (settings.branding?.displayDuration !== undefined) {
+            setDisplayDuration(settings.branding.displayDuration);
+          }
+          setCurrentScripture((prev) => {
+            if (!prev) return null;
+            const updated = {
+              ...prev,
+              churchName: settings.churchName || settings.name || prev.churchName,
+              logoUrl: settings.logoUrl !== undefined ? settings.logoUrl : prev.logoUrl,
+              translation: settings.preferredTranslation || prev.translation || 'KJV',
+            };
+            try {
+              localStorage.setItem('scripturelive_active_scripture', JSON.stringify(updated));
+            } catch { }
+            return updated;
+          });
         }
       };
     } catch (e) {
@@ -212,9 +230,26 @@ export const SocketProvider = ({ children }) => {
       }
     });
 
-    socketInstance.on('update-branding', (branding) => {
+    socketInstance.on('update-branding', (data) => {
+      const updatedBranding = data?.branding || (data?.template ? data : null);
+      const updatedChurch = data?.church;
       if (userRef.current) {
-        userRef.current.branding = branding;
+        if (updatedBranding) userRef.current.branding = updatedBranding;
+        if (updatedChurch) {
+          userRef.current.churchName = updatedChurch.churchName || userRef.current.churchName;
+          userRef.current.name = updatedChurch.name || userRef.current.name;
+          if (updatedChurch.logoUrl) userRef.current.logoUrl = updatedChurch.logoUrl;
+          if (updatedChurch.preferredTranslation) userRef.current.preferredTranslation = updatedChurch.preferredTranslation;
+        }
+      }
+      if (updatedBranding?.displayDuration !== undefined) {
+        setDisplayDuration(updatedBranding.displayDuration);
+      }
+      if (channelRef.current) {
+        channelRef.current.postMessage({
+          type: 'CHURCH_SETTINGS_UPDATED',
+          payload: { branding: updatedBranding, ...(updatedChurch || {}) },
+        });
       }
     });
 
@@ -353,15 +388,73 @@ export const SocketProvider = ({ children }) => {
     [socket]
   );
 
-  // Update branding broadcast
-  const emitUpdateBranding = useCallback(
-    (branding) => {
+  // Emit church settings and branding changes to projector and all open tabs
+  const emitUpdateChurchSettings = useCallback(
+    (settings) => {
+      if (!settings) return;
+
+      // 1. Update localStorage offline church
+      try {
+        const raw = localStorage.getItem('scripturelive_local_church');
+        const current = raw ? JSON.parse(raw) : {};
+        const merged = {
+          ...current,
+          ...settings,
+          churchName: settings.churchName || settings.name || current.churchName,
+          name: settings.churchName || settings.name || current.name,
+          branding: { ...(current.branding || {}), ...(settings.branding || {}) },
+          preferredTranslation: settings.preferredTranslation || current.preferredTranslation || 'KJV',
+        };
+        localStorage.setItem('scripturelive_local_church', JSON.stringify(merged));
+      } catch { }
+
+      // 2. Update display duration if customized
+      if (settings.branding?.displayDuration !== undefined) {
+        setDisplayDuration(settings.branding.displayDuration);
+      }
+
+      // 3. Update currently projected scripture (if any)
+      setCurrentScripture((prev) => {
+        if (!prev) return null;
+        const updated = {
+          ...prev,
+          churchName: settings.churchName || settings.name || prev.churchName,
+          logoUrl: settings.logoUrl !== undefined ? settings.logoUrl : prev.logoUrl,
+          translation: settings.preferredTranslation || prev.translation || 'KJV',
+        };
+        try {
+          localStorage.setItem('scripturelive_active_scripture', JSON.stringify(updated));
+        } catch { }
+        return updated;
+      });
+
+      // 4. Multi-tab BroadcastChannel
+      if (channelRef.current) {
+        channelRef.current.postMessage({
+          type: 'CHURCH_SETTINGS_UPDATED',
+          payload: settings,
+        });
+      }
+
+      // 5. Remote Socket.IO Room broadcast
       if (socket && socket.connected) {
         const churchId = userRef.current?.id || userRef.current?.churchId || 'public';
-        socket.emit('update-branding', { churchId, branding });
+        socket.emit('update-branding', {
+          churchId,
+          branding: settings.branding,
+          church: settings,
+        });
       }
     },
     [socket]
+  );
+
+  // Update branding broadcast
+  const emitUpdateBranding = useCallback(
+    (branding) => {
+      emitUpdateChurchSettings({ branding });
+    },
+    [emitUpdateChurchSettings]
   );
 
   // Broadcast mic status
@@ -917,6 +1010,7 @@ export const SocketProvider = ({ children }) => {
     emitClearProjection,
     emitScrollProjection,
     emitUpdateBranding,
+    emitUpdateChurchSettings,
     displayDuration,
     setDisplayDuration,
     liveTranscript,

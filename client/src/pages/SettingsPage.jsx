@@ -17,12 +17,13 @@ import {
   Check,
   Loader2,
   Sparkles,
+  BookOpen,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const SettingsPage = () => {
-  const { user, updateProfile, uploadLogo, updateBranding } = useAuth();
-  const { emitUpdateBranding } = useSocket();
+  const { user, updateProfile, uploadLogo, updateBranding, updateTranslation } = useAuth();
+  const { emitUpdateChurchSettings, emitUpdateBranding } = useSocket();
 
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState('branding'); // 'branding' | 'profile'
@@ -36,6 +37,11 @@ const SettingsPage = () => {
     state: user?.state || '',
     address: user?.address || '',
   });
+
+  // Preferred Bible Translation
+  const [preferredTranslation, setPreferredTranslation] = useState(
+    user?.preferredTranslation || 'KJV'
+  );
 
   // Branding & Projection Theme State
   const [branding, setBranding] = useState({
@@ -68,6 +74,9 @@ const SettingsPage = () => {
       if (user.logoUrl) {
         setLogoPreview(user.logoUrl);
       }
+      if (user.preferredTranslation) {
+        setPreferredTranslation(user.preferredTranslation);
+      }
     }
   }, [user]);
 
@@ -93,26 +102,51 @@ const SettingsPage = () => {
   };
 
   const handleSave = async (e) => {
-    e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
     setSaving(true);
 
     try {
+      let currentLogoUrl = logoPreview || user?.logoUrl;
       // 1. Upload logo if changed
       if (logoFile) {
-        await uploadLogo(logoFile);
+        const uploadRes = await uploadLogo(logoFile);
+        if (uploadRes?.logoUrl) {
+          currentLogoUrl = uploadRes.logoUrl;
+        }
       }
 
-      // 2. Update profile
-      await updateProfile(profile);
+      // 2. Update church profile with latest logo
+      const updatedProfile = {
+        ...profile,
+        logoUrl: currentLogoUrl,
+      };
+      await updateProfile(updatedProfile);
 
       // 3. Update branding
       await updateBranding(branding);
 
-      // 4. Emit to live socket room so active projection displays update on the fly!
-      emitUpdateBranding(branding);
+      // 4. Update default Bible translation
+      if (preferredTranslation) {
+        await updateTranslation(preferredTranslation);
+      }
 
-      toast.success('All church settings saved successfully');
+      // 5. Broadcast to all open tabs, windows, and socket room immediately
+      const fullSettings = {
+        ...updatedProfile,
+        branding,
+        preferredTranslation,
+        logoUrl: currentLogoUrl,
+      };
+
+      if (emitUpdateChurchSettings) {
+        emitUpdateChurchSettings(fullSettings);
+      } else if (emitUpdateBranding) {
+        emitUpdateBranding(branding);
+      }
+
+      toast.success('Church profile & projection settings saved successfully!');
     } catch (err) {
+      console.error('Failed to save settings:', err);
       toast.error('Failed to save some settings');
     } finally {
       setSaving(false);
@@ -123,8 +157,8 @@ const SettingsPage = () => {
   const sampleScripture = {
     reference: 'John 3:16',
     text: 'For God so loved the world, that he gave his only begotten Son, that whosoever believeth in him should not perish, but have everlasting life.',
-    translation: user?.preferredTranslation || 'KJV',
-    churchName: profile.churchName || 'Faith Church',
+    translation: preferredTranslation || 'KJV',
+    churchName: profile.churchName || user?.churchName || 'Faith Church',
     logoUrl: logoPreview,
   };
 
@@ -383,6 +417,31 @@ const SettingsPage = () => {
                   </div>
                 </div>
               </div>
+
+              {/* Default Bible Translation Card */}
+              <div className="bg-navy-900 border border-navy-800 rounded-2xl p-6 shadow-xl">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-bold text-white font-display flex items-center gap-2">
+                    <BookOpen className="w-4 h-4 text-gold-400" />
+                    <span>Default Bible Translation</span>
+                  </h3>
+                  <span className="text-xs px-2.5 py-0.5 rounded-lg bg-gold-500/20 text-gold-400 font-bold border border-gold-500/30">
+                    {preferredTranslation}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 mb-4">
+                  Select the primary scripture translation to project during services and sermons.
+                </p>
+                <div className="flex flex-wrap items-center gap-4">
+                  <TranslationSelector
+                    value={preferredTranslation}
+                    onChange={(newVal) => setPreferredTranslation(newVal)}
+                  />
+                  <span className="text-xs text-slate-400">
+                    Projector badges and scripture text will display in this version.
+                  </span>
+                </div>
+              </div>
             </div>
 
             {/* Right Col: Live Preview of Chosen Theme (5 cols) */}
@@ -524,6 +583,27 @@ const SettingsPage = () => {
                   className="w-full px-4 py-2.5 bg-navy-950/80 border border-navy-700 rounded-xl text-white text-xs focus:outline-none focus:border-gold-500"
                 />
               </div>
+            </div>
+
+            <div className="pt-4 border-t border-navy-800 flex justify-end">
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving}
+                className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-gradient-to-r from-gold-500 to-gold-600 hover:from-gold-400 hover:to-gold-500 text-navy-950 text-sm font-bold shadow-lg shadow-gold-500/20 transition-all cursor-pointer disabled:opacity-50"
+              >
+                {saving ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Saving Profile...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    <span>Save Church Profile</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
         )}

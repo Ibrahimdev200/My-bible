@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import api from '../utils/api';
 import { assetUrl, getErrorMessage } from '../utils/config';
 import toast from 'react-hot-toast';
@@ -61,14 +61,21 @@ export const AuthProvider = ({ children }) => {
       return null;
     }
   });
+  const userRef = useRef(user);
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
   const [token, setToken] = useState(() => localStorage.getItem('token'));
   const [loading, setLoading] = useState(true);
 
   const persistActiveUser = useCallback((userData) => {
+    userRef.current = userData;
     setUser(userData);
     try {
       if (userData) {
         localStorage.setItem(OFFLINE_CHURCH_KEY, JSON.stringify(userData));
+        window.dispatchEvent(new CustomEvent('church-settings-updated', { detail: userData }));
       } else {
         localStorage.removeItem(OFFLINE_CHURCH_KEY);
       }
@@ -294,16 +301,25 @@ export const AuthProvider = ({ children }) => {
     try {
       const res = await api.put('/church/profile', profileData);
       const updatedUser = normalizeUser(
-        res.data.church || res.data.user ? res.data : { ...user, ...profileData }
+        res.data.church || res.data.user ? res.data : { ...(userRef.current || {}), ...profileData }
       );
-      const merged = { ...user, ...updatedUser };
+      const current = userRef.current || {};
+      const merged = {
+        ...current,
+        ...updatedUser,
+        churchName: profileData.churchName || profileData.name || updatedUser?.churchName || current.churchName,
+        name: profileData.churchName || profileData.name || updatedUser?.name || current.name,
+        logoUrl: profileData.logoUrl !== undefined ? profileData.logoUrl : (updatedUser?.logoUrl || current.logoUrl),
+      };
       persistActiveUser(merged);
-      toast.success('Church profile updated successfully');
       return { success: true, user: merged };
     } catch (error) {
-      const merged = normalizeUser({ ...user, ...profileData });
+      const current = userRef.current || {};
+      const merged = normalizeUser({ ...current, ...profileData });
+      if (profileData.logoUrl !== undefined) {
+        merged.logoUrl = profileData.logoUrl;
+      }
       persistActiveUser(merged);
-      toast.success('Church profile saved');
       return { success: true, user: merged };
     }
   };
@@ -317,14 +333,16 @@ export const AuthProvider = ({ children }) => {
         headers: { 'Content-Type': undefined },
       });
       const logoUrl = assetUrl(res.data.logoUrl || res.data.url);
-      const merged = { ...user, logoUrl };
+      const current = userRef.current || {};
+      const merged = { ...current, logoUrl };
       persistActiveUser(merged);
       toast.success('Logo uploaded successfully');
       return { success: true, logoUrl };
     } catch (error) {
       const dataUrl = await fileToDataUrl(file);
       if (dataUrl) {
-        const merged = { ...user, logoUrl: dataUrl };
+        const current = userRef.current || {};
+        const merged = { ...current, logoUrl: dataUrl };
         persistActiveUser(merged);
         toast.success('Church logo saved');
         return { success: true, logoUrl: dataUrl };
@@ -340,20 +358,20 @@ export const AuthProvider = ({ children }) => {
     try {
       const res = await api.put('/church/branding', brandingData);
       const updatedBranding = res.data.branding || res.data;
+      const current = userRef.current || {};
       const merged = {
-        ...user,
-        branding: { ...(user?.branding || {}), ...updatedBranding },
+        ...current,
+        branding: { ...(current?.branding || {}), ...updatedBranding },
       };
       persistActiveUser(merged);
-      toast.success('Branding preferences saved');
       return { success: true, branding: merged.branding };
     } catch (error) {
+      const current = userRef.current || {};
       const merged = {
-        ...user,
-        branding: { ...(user?.branding || {}), ...brandingData },
+        ...current,
+        branding: { ...(current?.branding || {}), ...brandingData },
       };
       persistActiveUser(merged);
-      toast.success('Branding preferences saved');
       return { success: true, branding: merged.branding };
     }
   };
@@ -363,10 +381,10 @@ export const AuthProvider = ({ children }) => {
     try {
       await api.put('/church/translation', { translation });
     } catch { }
-    const merged = { ...user, preferredTranslation: translation };
+    const current = userRef.current || {};
+    const merged = { ...current, preferredTranslation: translation };
     persistActiveUser(merged);
-    toast.success(`Translation switched to ${translation}`);
-    return { success: true };
+    return { success: true, translation };
   };
 
   const value = {

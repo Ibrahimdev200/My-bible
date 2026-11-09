@@ -25,11 +25,77 @@ const ProjectionScreen = ({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [churchBranding, setChurchBranding] = useState(null);
   const [logoFailed, setLogoFailed] = useState(false);
+  const [liveChurch, setLiveChurch] = useState(() => {
+    try {
+      const raw = localStorage.getItem('scripturelive_local_church');
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  });
   const containerRef = useRef(null);
   const verseScrollRef = useRef(null);
 
   // Active scripture from prop override (when provided) or socket context
   const scripture = overrideScripture || socketScripture;
+
+  // Real-time synchronization across browser tabs, windows, and settings updates
+  useEffect(() => {
+    let bc;
+    try {
+      bc = new BroadcastChannel('scripturelive_channel');
+      bc.onmessage = (event) => {
+        if (event.data?.type === 'CHURCH_SETTINGS_UPDATED') {
+          const payload = event.data.payload || {};
+          setLiveChurch((prev) => ({
+            ...(prev || {}),
+            ...payload,
+            churchName: payload.churchName || payload.name || prev?.churchName,
+            name: payload.churchName || payload.name || prev?.name,
+            branding: { ...(prev?.branding || {}), ...(payload.branding || {}) },
+            preferredTranslation: payload.preferredTranslation || prev?.preferredTranslation,
+          }));
+          setLogoFailed(false);
+        }
+      };
+    } catch { }
+
+    const onStorage = (e) => {
+      if (e.key === 'scripturelive_local_church' && e.newValue) {
+        try {
+          setLiveChurch(JSON.parse(e.newValue));
+          setLogoFailed(false);
+        } catch { }
+      }
+    };
+
+    const onCustomUpdate = (e) => {
+      if (e.detail) {
+        setLiveChurch((prev) => ({ ...(prev || {}), ...e.detail }));
+        setLogoFailed(false);
+      }
+    };
+
+    window.addEventListener('storage', onStorage);
+    window.addEventListener('church-settings-updated', onCustomUpdate);
+
+    return () => {
+      if (bc) bc.close();
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('church-settings-updated', onCustomUpdate);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (user) {
+      setLiveChurch((prev) => ({
+        ...(prev || {}),
+        ...user,
+        branding: { ...(prev?.branding || {}), ...(user.branding || {}) },
+      }));
+      setLogoFailed(false);
+    }
+  }, [user]);
 
   // Automatically ensure voice recognition is active when the Projector screen is open
   useEffect(() => {
@@ -90,17 +156,19 @@ const ProjectionScreen = ({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [previewMode, scripture, emitClearProjection, processVoiceTranscript]);
 
-  // Active branding: props override or user branding or fetched branding
-  const activeBranding = overrideBranding ||
+  // Active branding: props override or live synced church branding or user branding or fetched branding
+  const activeBranding =
+    overrideBranding ||
+    liveChurch?.branding ||
     user?.branding ||
     churchBranding || {
-    template: 'classic',
-    primaryColor: '#f99307',
-    secondaryColor: '#1a3dff',
-    backgroundColor: '#0b1137',
-    textColor: '#ffffff',
-    fontSize: 48,
-  };
+      template: 'classic',
+      primaryColor: '#f99307',
+      secondaryColor: '#1a3dff',
+      backgroundColor: '#0b1137',
+      textColor: '#ffffff',
+      fontSize: 48,
+    };
 
   // Fetch church branding on load if not available
   useEffect(() => {
@@ -218,18 +286,20 @@ const ProjectionScreen = ({
   })();
 
   const churchTitle =
-    scripture?.churchName ||
+    overrideScripture?.churchName ||
+    liveChurch?.churchName ||
+    liveChurch?.name ||
     user?.churchName ||
     user?.name ||
-    localSavedChurch?.churchName ||
-    localSavedChurch?.name ||
+    scripture?.churchName ||
     'Sanctuary Worship';
 
   const rawLogo =
-    scripture?.logoUrl ||
+    overrideScripture?.logoUrl ||
+    liveChurch?.logoUrl ||
+    liveChurch?.logoPath ||
     user?.logoUrl ||
-    localSavedChurch?.logoUrl ||
-    localSavedChurch?.logoPath ||
+    scripture?.logoUrl ||
     '';
   const churchLogo = assetUrl(rawLogo);
 
@@ -238,9 +308,10 @@ const ProjectionScreen = ({
   }, [churchLogo]);
 
   const activeTranslationCode = (
-    scripture?.translation ||
+    overrideScripture?.translation ||
+    liveChurch?.preferredTranslation ||
     user?.preferredTranslation ||
-    localSavedChurch?.preferredTranslation ||
+    scripture?.translation ||
     'KJV'
   ).toUpperCase();
   const translationObj = TRANSLATIONS.find((t) => t.code === activeTranslationCode);
@@ -394,6 +465,10 @@ const ProjectionScreen = ({
                       ? 'text-xs leading-relaxed py-1'
                       : `${getDynamicFontSize(scripture.text)} leading-[1.45] py-2`
                   } ${currentStyles.verseText}`}
+                  style={{
+                    fontSize: !previewMode && activeBranding?.fontSize ? `${activeBranding.fontSize}px` : undefined,
+                    color: activeBranding?.textColor || undefined,
+                  }}
                 >
                   “{scripture.text}”
                 </div>
