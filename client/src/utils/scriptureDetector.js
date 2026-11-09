@@ -299,28 +299,27 @@ export function detectVoiceCommand(transcript, activeScripture = null) {
     return null;
   }
 
-  // 2. Close / Clear / Vanish commands
+  // 2. Close / Clear / Vanish commands (strictly explicit close commands)
   if (
-    /\b(close|clear|vanish|hide|dismiss|stop projecting|remove scripture|close screen|clear screen|close projector|off screen)\b/.test(
+    /^(?:please\s+)?(close|clear|vanish|dismiss|close projection|close screen|clear screen|close projector|stop projecting)$/.test(
+      joined
+    ) ||
+    /\b(close projection|close screen|clear screen|close projector|stop projecting)\b/.test(
       tail
     )
   ) {
     return { type: 'CLEAR' };
   }
 
-  // 3. Scroll Up / Scroll Down commands
+  // 3. Scroll Up / Scroll Down commands (strictly explicit scroll commands)
   if (
-      /\b(scroll down | scrolling down | page down | move down | go down | slide down | down a bit | scroll to bottom) \b /.test(
-        tail
-      )
-    ) {
+    /\b(scroll down|scrolling down|page down|scroll to bottom)\b/.test(tail)
+  ) {
     return { type: 'SCROLL', direction: 'down' };
   }
   if (
-      /\b(scroll up | scrolling up | page up | move up | go up | slide up | up a bit | scroll to top | back to top) \b /.test(
-        tail
-      )
-    ) {
+    /\b(scroll up|scrolling up|page up|scroll to top|back to top)\b/.test(tail)
+  ) {
     return { type: 'SCROLL', direction: 'up' };
   }
 
@@ -336,110 +335,109 @@ export function detectVoiceCommand(transcript, activeScripture = null) {
     return null;
   }
 
-  // 4a. Next / Previous verse
-    if (
-      /\b(next verse|next one|continue to next|go to next|read next|forward)\b/.test(tail) ||
-      tail === 'next'
-    ) {
-      const nextV = (ctx.endVerse || ctx.startVerse || 1) + 1;
+  // 4a. Next / Previous verse (strictly explicit verse stepping)
+  if (/\b(next verse|go to next verse|read next verse)\b/.test(tail)) {
+    const nextV = (ctx.endVerse || ctx.startVerse || 1) + 1;
+    return {
+      type: 'NAVIGATE',
+      bookName: ctx.bookName,
+      chapter: ctx.chapter,
+      startVerse: nextV,
+      endVerse: nextV,
+      reference: `${ctx.bookName} ${ctx.chapter}:${nextV}`,
+    };
+  }
+
+  if (/\b(previous verse|prev verse|last verse|go to previous verse)\b/.test(tail)) {
+    const prevV = Math.max(1, (ctx.startVerse || 1) - 1);
+    return {
+      type: 'NAVIGATE',
+      bookName: ctx.bookName,
+      chapter: ctx.chapter,
+      startVerse: prevV,
+      endVerse: prevV,
+      reference: `${ctx.bookName} ${ctx.chapter}:${prevV}`,
+    };
+  }
+
+  // 4b. Chapter + optional verse navigation within current book ("go to chapter 2 verse 4" or "chapter 3")
+  const chapMatch =
+    /^(?:please\s+)?(?:go to|navigate to|open|jump to|switch to)?\s*chapter\s+(\d{1,3})(?:\s+verse\s+(\d{1,3})(?:\s+(?:to|through|and)\s+(?:verse\s+)?(\d{1,3}))?)?$/.exec(
+      joined
+    );
+  if (chapMatch) {
+    const ch = parseInt(chapMatch[1], 10);
+    const vStart = chapMatch[2] ? parseInt(chapMatch[2], 10) : 1;
+    const vEnd = chapMatch[3] ? parseInt(chapMatch[3], 10) : vStart;
+    const ref =
+      chapMatch[2]
+        ? vEnd > vStart
+          ? `${ctx.bookName} ${ch}:${vStart}-${vEnd}`
+          : `${ctx.bookName} ${ch}:${vStart}`
+        : `${ctx.bookName} ${ch}:1`;
+    return {
+      type: 'NAVIGATE',
+      bookName: ctx.bookName,
+      chapter: ch,
+      startVerse: vStart,
+      endVerse: vEnd,
+      reference: ref,
+    };
+  }
+
+  // 4c. Explicit verse navigation within current book & chapter:
+  // e.g. "go to verse 4", "navigate to verse 9", "verse 4", "verse 4 to 7", "go to 4", "navigate to 9", "jump to 5"
+  const verseNavMatch =
+    /\b(?:go to|navigate to|jump to|move to|read|show|project)\s+(?:verse|verses|vs|v)?\s*(\d{1,3})(?:\s+(?:to|through|thru|and)\s+(?:verse\s+)?(\d{1,3}))?\b/.exec(
+      tail
+    ) ||
+    /^(?:verse|verses|vs|v)\s+(\d{1,3})(?:\s+(?:to|through|thru|and)\s+(?:verse\s+)?(\d{1,3}))?$/.exec(
+      joined
+    );
+
+  if (verseNavMatch) {
+    const vStart = parseInt(verseNavMatch[1], 10);
+    const vEnd = verseNavMatch[2] ? parseInt(verseNavMatch[2], 10) : vStart;
+    if (vStart >= 1 && vStart <= 176) {
+      const endClamped = vEnd >= vStart && vEnd <= 176 ? vEnd : vStart;
+      const ref =
+        endClamped > vStart
+          ? `${ctx.bookName} ${ctx.chapter}:${vStart}-${endClamped}`
+          : `${ctx.bookName} ${ctx.chapter}:${vStart}`;
       return {
         type: 'NAVIGATE',
         bookName: ctx.bookName,
         chapter: ctx.chapter,
-        startVerse: nextV,
-        endVerse: nextV,
-        reference: `${ctx.bookName} ${ctx.chapter}:${nextV}`,
+        startVerse: vStart,
+        endVerse: endClamped,
+        reference: ref,
       };
     }
+  }
 
-      if (/\b(previous verse|prev verse|last verse|go back|previous|back one verse)\b/.test(tail)) {
-        const prevV = Math.max(1, (ctx.startVerse || 1) - 1);
-        return {
-          type: 'NAVIGATE',
-          bookName: ctx.bookName,
-          chapter: ctx.chapter,
-          startVerse: prevV,
-          endVerse: prevV,
-          reference: `${ctx.bookName} ${ctx.chapter}:${prevV}`,
-        };
-      }
+  // 4d. Bare number spoken when already on a scripture (e.g., user says "9" or "nine" or "9 to 12")
+  const bareNumMatch = /^(\d{1,3})(?:\s+(?:to|through|and)\s+(\d{1,3}))?$/.exec(joined);
+  if (bareNumMatch) {
+    const vStart = parseInt(bareNumMatch[1], 10);
+    const vEnd = bareNumMatch[2] ? parseInt(bareNumMatch[2], 10) : vStart;
+    if (vStart >= 1 && vStart <= 176) {
+      const endClamped = vEnd >= vStart && vEnd <= 176 ? vEnd : vStart;
+      const ref =
+        endClamped > vStart
+          ? `${ctx.bookName} ${ctx.chapter}:${vStart}-${endClamped}`
+          : `${ctx.bookName} ${ctx.chapter}:${vStart}`;
+      return {
+        type: 'NAVIGATE',
+        bookName: ctx.bookName,
+        chapter: ctx.chapter,
+        startVerse: vStart,
+        endVerse: endClamped,
+        reference: ref,
+      };
+    }
+  }
 
-      // 4b. Chapter + optional verse navigation within current book ("go to chapter 2 verse 4" or "chapter 3")
-      const chapMatch =
-        /\b(?:go to|navigate to|open|jump to|switch to)?\s*chapter\s+(\d{1,3})(?:\s+verse\s+(\d{1,3})(?:\s+(?:to|through|and)\s+(?:verse\s+)?(\d{1,3}))?)?\b/.exec(
-          tail
-        );
-      if (chapMatch) {
-        const ch = parseInt(chapMatch[1], 10);
-        const vStart = chapMatch[2] ? parseInt(chapMatch[2], 10) : 1;
-        const vEnd = chapMatch[3] ? parseInt(chapMatch[3], 10) : vStart;
-        const ref =
-          vEnd > vStart
-            ? `${ctx.bookName} ${ch}:${vStart}-${vEnd}`
-            : `${ctx.bookName} ${ch}:${vStart}`;
-        return {
-          type: 'NAVIGATE',
-          bookName: ctx.bookName,
-          chapter: ch,
-          startVerse: vStart,
-          endVerse: vEnd,
-          reference: ref,
-        };
-      }
-
-      // 4c. Explicit verse navigation within current book & chapter:
-      // e.g. "go to verse 4", "navigate to verse 9", "verse 4", "verse 4 to 7", "go to 4", "navigate to 9", "jump to 5"
-      const verseNavMatch =
-        /\b(?:go to|navigate to|jump to|move to|read|show|project|from)?\s*(?:verse|verses|vs|v)\s+(\d{1,3})(?:\s+(?:to|through|thru|and)\s+(?:verse\s+)?(\d{1,3}))?\b/.exec(
-      tail
-        ) ||
-        /\b(?:go to|navigate to|jump to|move to|verse)\s+(\d{1,3})(?:\s+(?:to|through|thru|and)\s+(\d{1,3}))?\b/.exec(
-      tail
-        );
-
-      if (verseNavMatch) {
-        const vStart = parseInt(verseNavMatch[1], 10);
-        const vEnd = verseNavMatch[2] ? parseInt(verseNavMatch[2], 10) : vStart;
-        if (vStart >= 1 && vStart <= 176) {
-          const endClamped = vEnd >= vStart && vEnd <= 176 ? vEnd : vStart;
-          const ref =
-            endClamped > vStart
-              ? `${ctx.bookName} ${ctx.chapter}:${vStart}-${endClamped}`
-              : `${ctx.bookName} ${ctx.chapter}:${vStart}`;
-          return {
-            type: 'NAVIGATE',
-            bookName: ctx.bookName,
-            chapter: ctx.chapter,
-            startVerse: vStart,
-            endVerse: endClamped,
-            reference: ref,
-          };
-        }
-      }
-
-      // 4d. Bare number spoken when already on a scripture (e.g., user says "9" or "nine" or "9 to 12")
-      const bareNumMatch = /^(\d{1,3})(?:\s+(?:to|through|and)\s+(\d{1,3}))?$/.exec(joined);
-      if (bareNumMatch) {
-        const vStart = parseInt(bareNumMatch[1], 10);
-        const vEnd = bareNumMatch[2] ? parseInt(bareNumMatch[2], 10) : vStart;
-        if (vStart >= 1 && vStart <= 176) {
-          const endClamped = vEnd >= vStart && vEnd <= 176 ? vEnd : vStart;
-          const ref =
-            endClamped > vStart
-              ? `${ctx.bookName} ${ctx.chapter}:${vStart}-${endClamped}`
-              : `${ctx.bookName} ${ctx.chapter}:${vStart}`;
-          return {
-            type: 'NAVIGATE',
-            bookName: ctx.bookName,
-            chapter: ctx.chapter,
-            startVerse: vStart,
-            endVerse: endClamped,
-            reference: ref,
-          };
-        }
-      }
-
-      return null;
+  return null;
     }
 
     export default detectScripture;

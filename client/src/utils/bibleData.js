@@ -163,12 +163,34 @@ export async function fetchFallbackVerseText(reference, translation = 'KJV') {
     );
     if (resp.ok) {
       const data = await resp.json();
+      if (data && Array.isArray(data.verses) && data.verses.length > 1) {
+        return data.verses
+          .map((v, idx) => `[${v.verse || idx + 1}] ${String(v.text || '').replace(/\s+/g, ' ').trim()}`)
+          .join(' ');
+      }
       if (data && data.text) {
         return String(data.text).replace(/\s+/g, ' ').trim();
       }
     }
   } catch {
     // ignore network error
+  }
+
+  // Offline chapter or range fallback from bundled FALLBACK_VERSES
+  if (!String(reference).includes(':')) {
+    const prefix = `${reference}:`;
+    const chapterMatches = Object.entries(FALLBACK_VERSES)
+      .filter(([k]) => k.toLowerCase().startsWith(prefix.toLowerCase()))
+      .map(([k, text]) => ({
+        verse: parseInt(k.split(':')[1], 10) || 1,
+        text,
+      }))
+      .sort((a, b) => a.verse - b.verse);
+    if (chapterMatches.length > 0) {
+      return chapterMatches.length > 1
+        ? chapterMatches.map((v) => `[${v.verse}] ${v.text}`).join(' ')
+        : chapterMatches[0].text;
+    }
   }
   return '';
 }

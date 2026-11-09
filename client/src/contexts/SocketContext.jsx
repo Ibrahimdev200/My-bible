@@ -66,6 +66,7 @@ export const SocketProvider = ({ children }) => {
   const lastCommandKey = useRef('');
   const lastCommandTime = useRef(0);
   const interimQuoteTimer = useRef(null);
+  const interimProcessTimer = useRef(null);
   const lastBackendText = useRef('');
 
   useEffect(() => {
@@ -569,11 +570,8 @@ export const SocketProvider = ({ children }) => {
           }
       }
 
-        // 2. Check for Full Bible Scripture Reference ("Psalm 1 verse 2", "John 3:16")
-        const candidateText =
-          rollingWindow && rollingWindow.length > text.length ? rollingWindow : text;
-        const detected =
-          detectScripture(text) || (rollingWindow ? detectScripture(rollingWindow) : null);
+        // 2. Check for Full Bible Scripture Reference ("Psalm 1 verse 2", "John 3:16", "Psalm 23")
+        const detected = detectScripture(text);
 
         if (detected) {
           if (interimQuoteTimer.current) {
@@ -585,7 +583,7 @@ export const SocketProvider = ({ children }) => {
           if (
             !bypassCooldown &&
             lastDetectedRef.current === detected.reference &&
-            now - lastDetectedTime.current < 2000
+            now - lastDetectedTime.current < 2500
           ) {
             return;
           }
@@ -649,18 +647,21 @@ export const SocketProvider = ({ children }) => {
         }
 
         // 3. Spoken Scripture Quote Detection
-        const wordCount = candidateText.trim().split(/\s+/).length;
-        if (isFinal) {
+        // IMPORTANT FOR CHAPTER CONSISTENCY:
+        // When a chapter/scripture is already displayed on the projector (`currentScriptureRef.current` is active),
+        // keep that chapter locked on screen until another explicit chapter/reference is mentioned or the timer expires,
+        // rather than letting background sermon sentences fuzzily jump to other chapters.
+        if (currentScriptureRef.current && !bypassCooldown) {
+          return;
+        }
+
+        const wordCount = text.trim().split(/\s+/).length;
+        if (isFinal && (bypassCooldown || wordCount >= 6)) {
           if (interimQuoteTimer.current) {
             clearTimeout(interimQuoteTimer.current);
             interimQuoteTimer.current = null;
           }
-          await runBackendDetection(candidateText, currentTranslation, bypassCooldown);
-        } else if (wordCount >= 5) {
-          if (interimQuoteTimer.current) clearTimeout(interimQuoteTimer.current);
-          interimQuoteTimer.current = setTimeout(() => {
-            runBackendDetection(candidateText, currentTranslation, false);
-          }, 320);
+          await runBackendDetection(text, currentTranslation, bypassCooldown);
         }
       },
       [emitClearProjection, emitScrollProjection, emitScriptureDetected, runBackendDetection, saveHistory]
@@ -793,38 +794,45 @@ export const SocketProvider = ({ children }) => {
             let interimTranscript = '';
             let finalTranscript = '';
 
-            const startIdx = Math.max(0, event.resultIndex - 1);
-            let rollingWindow = '';
-
-            for (let i = startIdx; i < event.results.length; ++i) {
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
               const bestPiece = event.results[i][0].transcript;
-              rollingWindow += ' ' + bestPiece;
-
-              if (i >= event.resultIndex) {
-                if (event.results[i].isFinal) {
-                  finalTranscript += bestPiece;
-                } else {
-                  interimTranscript += bestPiece;
-                }
+              if (event.results[i].isFinal) {
+                finalTranscript += bestPiece;
+              } else {
+                interimTranscript += bestPiece;
               }
             }
 
-            if (processVoiceTranscriptRef.current) {
-              if (finalTranscript.trim()) {
-                processVoiceTranscriptRef.current(
-                  finalTranscript.trim(),
-                  true,
-                  false,
-                  rollingWindow.trim()
-                );
-              } else if (interimTranscript.trim()) {
-                processVoiceTranscriptRef.current(
-                  interimTranscript.trim(),
-                  false,
-                  false,
-                  rollingWindow.trim()
-                );
+            const finalClean = finalTranscript.trim();
+            const interimClean = interimTranscript.trim();
+
+            if (finalClean) {
+              if (interimProcessTimer.current) {
+                clearTimeout(interimProcessTimer.current);
+                interimProcessTimer.current = null;
               }
+              if (processVoiceTranscriptRef.current) {
+                processVoiceTranscriptRef.current(finalClean, true, false);
+              }
+            } else if (interimClean) {
+              // Update live transcript UI immediately
+              setLiveTranscript(interimClean);
+              if (channelRef.current) {
+                channelRef.current.postMessage({
+                  type: 'LIVE_TRANSCRIPT',
+                  payload: interimClean,
+                  senderTabId: tabIdRef.current,
+                });
+              }
+              // Wait 500ms for speaker to finish the chapter/verse number before triggering projection
+              if (interimProcessTimer.current) {
+                clearTimeout(interimProcessTimer.current);
+              }
+              interimProcessTimer.current = setTimeout(() => {
+                if (processVoiceTranscriptRef.current) {
+                  processVoiceTranscriptRef.current(interimClean, false, false);
+                }
+              }, 500);
             }
           };
 
