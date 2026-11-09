@@ -2,10 +2,10 @@
   "framework": "vite",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "functions": {
-    "server.js": {
-      "includeFiles": "dist/**"
+  "rewrites": [
+    {
+      "source": "/((?!assets/|favicon\\.svg).*)",
+      "destination": "/index.html"
     }
-  },
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  ]
 }
